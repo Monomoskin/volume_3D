@@ -24,3 +24,5 @@ Thumbs.db # Windows
 yolo/
 output_predict/
 output_predict_v1/
+output_train/
+output1/
