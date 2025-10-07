@@ -1,0 +1,62 @@
+Of course! Here's the **English version** of the prerequisites adapted for **Windows**:
+
+---
+
+### Prerequisites (Windows)
+
+Before running this project on Windows, make sure your environment meets the following requirements:
+
+#### 1️⃣ **Required Hardware**
+- A PC with an **NVIDIA GPU** (optional but recommended for faster training).
+- At least **16GB of RAM** for efficient training.
+- A camera with **known zoom values** (e.g., iPhone or any professional camera).
+
+#### 2️⃣ **Required Software**
+- **Windows 10 or later**.
+- **Visual Studio Code** (VS Code) or **PyCharm**.
+- **Python 3.10 or later** (download from [python.org](https://www.python.org/downloads/)).
+- **pip** and **virtualenv** (usually included with Python or installable via pip).
+
+
+#### 3️⃣ **Python Dependencies**
+Install the following dependencies using Command Prompt or PowerShell:
+
+```sh
+# Install PyTorch with CUDA (check your CUDA version at https://pytorch.org/get-started/locally/)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+
+
+pip install timm pandas pillow numpy opencv-python tqdm matplotlib
+```
+
+Importante: check the box "Add Python to PATH" before click to  "Install Now".
+
+click on "Install Now".
+
+> ⚠️ **Tip:** Run `python --version` and `pip --version` to make sure everything is installed correctly.
+
+#### 4️⃣ **Recommended VS Code Extensions**
+If you're using Visual Studio Code, install the following extensions:
+
+- **Python** (by Microsoft)
+- **Pylance** (by Microsoft)
+- **Jupyter** (by Microsoft)
+- **TensorBoard** (optional, for visualizing training)
+
+#### 5️⃣ **Virtual Environment Setup (optional but recommended)**
+
+```sh
+# Create a virtual environment
+python -m venv venv
+
+# Activate the environment on Windows
+venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+---
+
+Let me know if you want the `requirements.txt` file or anything else pre-configured!

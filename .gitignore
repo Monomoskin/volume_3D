@@ -1,0 +1,26 @@
+# Archivos de entorno virtual
+venv/
+env/
+.venv/
+
+# Archivos de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Archivos generados por Detectron2
+ 
+*checkpoint.pth
+
+# Logs y bases de datos
+*.log
+*.sqlite3
+
+# Archivos del sistema operativo
+.DS_Store # macOS
+Thumbs.db # Windows
+
+yolo/
+output_predict/
+output_predict_v1/
