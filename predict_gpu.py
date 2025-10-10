@@ -282,7 +282,7 @@ def main():
     cfg.MODEL.WEIGHTS = model_path
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(category_names)
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.70 
-    cfg.MODEL.DEVICE = "cpu"
+    cfg.MODEL.DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
     predictor = DefaultPredictor(cfg)
 
     # -------------------------------------------------------------
