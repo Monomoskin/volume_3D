@@ -17,19 +17,33 @@ class CustomTrainer(DefaultTrainer):
     @classmethod
     def build_train_loader(cls, cfg):
         mapper = DatasetMapper(
-            cfg, is_train=True, 
+            cfg, 
+            is_train=True, 
             augmentations=[
-                T.ResizeShortestEdge(short_edge_length=(512, 512), max_size=1024, sample_style='choice'),
-                T.RandomFlip(prob=0.5, horizontal=True, vertical=True), 
+                # 1. Transformaciones Geométricas Estándar
+                T.ResizeShortestEdge(
+                    short_edge_length=(512, 512),
+                    max_size=1024,
+                    sample_style='choice'
+                ),
+                # === CÓDIGO CORREGIDO ===
+                T.RandomFlip(prob=0.5, horizontal=True, vertical=False), # Flip Horizontal (TOP/SIDE)
+                T.RandomFlip(prob=0.5, horizontal=False, vertical=True), # Flip Vertical (Útil para TOP)
+                # ========================
+                
+                # 2. AUMENTACIÓN DE COLOR/TEXTURA
                 T.RandomBrightness(0.6, 1.4),   
                 T.RandomSaturation(0.6, 1.4),  
                 T.RandomContrast(0.6, 1.4),     
+                
+                # 3. Rotación
                 T.RandomRotation(angle=[-30, 30], expand=False, sample_style='choice'),
+                
+                # 4. Recorte Aleatorio
                 T.RandomCrop('relative_range', (0.7, 1.0))
             ]
         )
         return build_detection_train_loader(cfg, mapper=mapper)
-
 def setup_dataset():
     json_path = os.path.join("annotations", "coco_annotations.json")
     image_dir = "images"

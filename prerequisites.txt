@@ -6,3 +6,4 @@ numpy
 timm
 pandas
 tqdm
+shapely
