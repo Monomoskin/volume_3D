@@ -18,8 +18,8 @@ __pycache__/
 *.sqlite3
 
 # Archivos del sistema operativo
-.DS_Store # macOS
-Thumbs.db # Windows
+.DS_Store
+Thumbs.db  
 
 yolo/
 output_predict/
