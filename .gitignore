@@ -2,7 +2,7 @@
 venv/
 env/
 .venv/
-
+ 
 # Archivos de Python
 __pycache__/
 *.pyc
@@ -10,7 +10,6 @@ __pycache__/
 *.pyd
 
 # Archivos generados por Detectron2
- 
 *checkpoint.pth
 
 # Logs y bases de datos
@@ -21,8 +20,15 @@ __pycache__/
 .DS_Store
 Thumbs.db  
 
-yolo/
+
 output_predict/
 output_predict_v1/
 output_train/
 output1/
+
+
+# Carpeta del repositorio de Detectron2 (si existe)
+detectron2/
+
+# Entorno virtual
+newenv/

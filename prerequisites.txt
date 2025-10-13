@@ -7,3 +7,5 @@ timm
 pandas
 tqdm
 shapely
+opencv-python
+pandas

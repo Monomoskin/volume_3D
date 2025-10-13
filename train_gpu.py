@@ -76,9 +76,15 @@ def train_model(metadata):
     cfg.SOLVER.MAX_ITER = 10000
     cfg.SOLVER.OPTIMIZER = "AdamW"
     cfg.SOLVER.STEPS = [] 
-    cfg.SOLVER.IMS_PER_BATCH = 2  
+    cfg.SOLVER.IMS_PER_BATCH = 1  
     cfg.SOLVER.WEIGHT_DECAY = 0.0001
     cfg.SOLVER.CHECKPOINT_PERIOD = 1000
+
+    # ==========================================================
+    # SOLUCIÓN: Desactivar workers para evitar el error 'shapely' en subprocesos
+    cfg.DATALOADER.NUM_WORKERS = 0  # <--- ¡ESTA ES LA LÍNEA CLAVE!
+    # ==========================================================
+
 
     cfg.OUTPUT_DIR = "output_train"
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
