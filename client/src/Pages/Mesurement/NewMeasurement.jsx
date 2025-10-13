@@ -1,7 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Layout,
-  Menu,
   Form,
   Select,
   Input,
@@ -13,8 +12,8 @@ import {
   Col,
   Typography,
   Spin,
-  Progress, // Mantener Progress por si se usa más tarde
   message,
+  Alert,
 } from "antd";
 import {
   UploadOutlined,
@@ -22,29 +21,101 @@ import {
   LoadingOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
-import { analyzeSample } from "../../service/api";
+import { analyzeSample, getEstimationsSummary } from "../../service/api";
+import Results from "./Results";
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
 const { Option } = Select;
 
-// Datos de celulas mock
-const MOCK_CELLS = [
-  { code: "C-12345", name: "Cell Alpha" },
-  { code: "C-67890", name: "Cell Beta" },
-];
-
 const NewMeasurement = () => {
   const [form] = Form.useForm();
+
+  // Estados para la carga de células existentes
+  const [availableCells, setAvailableCells] = useState([]);
+  const [loadingCells, setLoadingCells] = useState(true);
+  const [cellsError, setCellsError] = useState(null);
+
+  // Estados del formulario y procesamiento
   const [selectedCell, setSelectedCell] = useState(null);
   const [topFile, setTopFile] = useState([]);
   const [sideFile, setSideFile] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  // Eliminamos el estado 'progress' de la simulación
   const [results, setResults] = useState(null);
+
+  // -------------------------------------------------------------------
+  // LÓGICA DE CARGA DE CÉLULAS EXISTENTES
+  // -------------------------------------------------------------------
+  useEffect(() => {
+    const fetchAvailableCells = async () => {
+      try {
+        setLoadingCells(true);
+        setCellsError(null);
+
+        const summaryData = await getEstimationsSummary();
+
+        const cellsList = summaryData.map((item) => ({
+          code: item["Cell Name"],
+          name: item["Cell Name"],
+        }));
+
+        setAvailableCells(cellsList);
+      } catch (error) {
+        console.error("Error fetching available cells:", error);
+        setCellsError(
+          "Failed to load cell list. Check network or server status."
+        );
+      } finally {
+        setLoadingCells(false);
+      }
+    };
+
+    fetchAvailableCells();
+  }, []);
+
+  // -------------------------------------------------------------------
+  // MANEJO DE ARCHIVOS Y PROPS DE UPLOAD (con previsualización)
+  // -------------------------------------------------------------------
+
+  const fileUploadProps = (fileListState, setFileListState) => ({
+    accept: ".jpg,.jpeg,.png",
+    onRemove: () => setFileListState([]),
+    beforeUpload: (file) => {
+      // 1. Crear el FileReader
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        // 2. ¡CRÍTICO! Almacenar el archivo binario original (file) bajo la clave 'originFileObj'
+        setFileListState([
+          {
+            ...file,
+            status: "done",
+            preview: e.target.result,
+            originFileObj: file, // 👈 SOLUCIÓN: Preservar el objeto File nativo aquí
+          },
+        ]);
+      };
+      reader.readAsDataURL(file);
+      return false; // Previene la subida automática
+    },
+
+    // (El resto de la función fileUploadProps permanece igual)
+    fileList: fileListState.map((file) => ({
+      ...file,
+      uid: file.uid || file.name,
+      name: file.name,
+      status: "done",
+    })),
+    maxCount: 1,
+    showUploadList: false,
+  });
+
+  // -------------------------------------------------------------------
+  // MANEJO DEL FORMULARIO Y API
+  // -------------------------------------------------------------------
 
   // Determina si el botón de Análisis debe estar activo
   const canAnalyze =
+    !loadingCells &&
     ((selectedCell && selectedCell !== "new") ||
       (selectedCell === "new" &&
         form.getFieldValue("cellName") &&
@@ -60,65 +131,45 @@ const NewMeasurement = () => {
     message.info("Starting 3D analysis. Waiting for backend response...");
 
     try {
-      // 1. Obtener los archivos de imagen reales (no el array de Antd)
-      const actualTopFile = topFile[0].originFileObj || topFile[0];
-      const actualSideFile = sideFile[0].originFileObj || sideFile[0];
-
-      // 2. 🔴 Llamada real a la API
+      const actualTopFile = topFile[0].originFileObj;
+      const actualSideFile = sideFile[0].originFileObj;
+      console.log(topFile, sideFile);
       const response = await analyzeSample(
         values,
         actualTopFile,
         actualSideFile
       );
 
-      // 3. Almacenar la respuesta del backend
       setResults({
-        sample_key: response.cell_name,
-        volume_ml: response.estimated_volume,
-        // 🔴 Usamos las URLs proporcionadas por Flask
+        cell_name: response.cell_name,
+        volume_ml: parseFloat(response.estimated_volume),
         top_image_url: response.predicted_image_top_url,
         side_image_url: response.predicted_image_side_url,
+        measurement_id: response.measurement_id,
       });
 
       message.success(
-        `Analysis completed for ${
-          response.cell_name
-        }. Volume: ${response.estimated_volume.toFixed(3)} mL`
+        `Analysis completed for ${response["Cell Name"]}. Volume: ${parseFloat(
+          response["Estimated Volume (mL)"]
+        ).toFixed(3)} mL`
       );
     } catch (error) {
-      const errorMessage = error.message.includes("HTTP")
-        ? "Failed to communicate with the Backend. Is the Flask server running on http://localhost:5000?"
-        : error.message;
+      const defaultMessage =
+        "Failed to communicate with the Backend. Please check server status.";
+      const errorMessage = error.message || defaultMessage;
 
       message.error(`Analysis Failed: ${errorMessage}`);
-      console.error(error);
+      console.error("API Error:", error);
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // Props para el componente Upload (configura el manejo de archivos)
-  const fileUploadProps = (fileListState, setFileListState) => ({
-    accept: ".jpg,.jpeg,.png",
-    onRemove: () => setFileListState([]),
-    beforeUpload: (file) => {
-      setFileListState([file]); // Solo permite 1 archivo
-      return false; // Previene la subida automática de Antd
-    },
-    fileList: fileListState.map((file) => ({
-      ...file,
-      uid: file.uid || file.name, // Asegurar uid para Antd
-      name: file.name,
-      status: "done", // Mostrar como ya cargado localmente
-    })),
-    maxCount: 1,
-  });
-
   // Maneja el cambio en el selector de Célula
   const handleCellChange = (value) => {
     setSelectedCell(value);
     if (value !== "new") {
-      const cell = MOCK_CELLS.find((c) => c.code === value);
+      const cell = availableCells.find((c) => c.code === value);
       form.setFieldsValue({
         cellName: cell ? cell.name : "",
         idCode: value,
@@ -127,6 +178,52 @@ const NewMeasurement = () => {
       form.setFieldsValue({ cellName: "", idCode: "" });
     }
   };
+
+  // -------------------------------------------------------------------
+  // RENDERIZADO DEL SELECTOR DE CÉLULAS (maneja carga y error)
+  // -------------------------------------------------------------------
+  const renderCellSelector = () => {
+    if (loadingCells) {
+      return (
+        <Spin
+          indicator={<LoadingOutlined style={{ fontSize: 24 }} spin />}
+          tip="Loading cells..."
+        />
+      );
+    }
+
+    if (cellsError) {
+      return (
+        <Alert
+          message="Error loading cells"
+          description={cellsError}
+          type="error"
+          showIcon
+        />
+      );
+    }
+
+    return (
+      <Select
+        placeholder="Select an existing cell or register a new one"
+        onChange={handleCellChange}
+      >
+        <Option value="new">➕ Register New Cell</Option>
+        {availableCells.map((cell) => (
+          <Option key={cell.code} value={cell.code}>
+            {cell.name} ({cell.code})
+          </Option>
+        ))}
+        {availableCells.length === 0 && (
+          <Option disabled>No existing cells found. Register a new one.</Option>
+        )}
+      </Select>
+    );
+  };
+
+  // -------------------------------------------------------------------
+  // RENDERIZADO PRINCIPAL
+  // -------------------------------------------------------------------
 
   return (
     <div className="min-h-screen font-sans">
@@ -139,10 +236,11 @@ const NewMeasurement = () => {
       >
         <div className="p-3">
           <h2 className="text-3xl text-white font-bold text-left">
-            New Measurement
+            New Measurement 🔬
           </h2>
 
           <Row gutter={[32, 32]} className="mt-8">
+            {/* Columna de Formulario */}
             <Col xs={24} md={12}>
               <Card title="Sample Data" className="shadow-lg ">
                 <Form
@@ -159,17 +257,7 @@ const NewMeasurement = () => {
                       { required: true, message: "Please select a cell." },
                     ]}
                   >
-                    <Select
-                      placeholder="Select an existing cell or register a new one"
-                      onChange={handleCellChange}
-                    >
-                      <Option value="new">➕ Register New Cell</Option>
-                      {MOCK_CELLS.map((cell) => (
-                        <Option key={cell.code} value={cell.code}>
-                          {cell.name} ({cell.code})
-                        </Option>
-                      ))}
-                    </Select>
+                    {renderCellSelector()}
                   </Form.Item>
 
                   {/* Nombre y Código */}
@@ -177,13 +265,13 @@ const NewMeasurement = () => {
                     label="Cell Name"
                     name="cellName"
                     rules={[
-                      {
-                        required: true,
-                        message: "The cell name is required.",
-                      },
+                      { required: true, message: "The cell name is required." },
                     ]}
                   >
-                    <Input placeholder="e.g., Callus_A_Type_1" />
+                    <Input
+                      placeholder="e.g., Callus_A_Type_1"
+                      disabled={selectedCell && selectedCell !== "new"}
+                    />
                   </Form.Item>
                   <Form.Item
                     label="Identification Code"
@@ -195,7 +283,10 @@ const NewMeasurement = () => {
                       },
                     ]}
                   >
-                    <Input placeholder="e.g., C-12345" />
+                    <Input
+                      placeholder="e.g., C-12345"
+                      disabled={selectedCell && selectedCell !== "new"}
+                    />
                   </Form.Item>
 
                   {/* Fecha de la Foto */}
@@ -222,28 +313,51 @@ const NewMeasurement = () => {
                         <Upload.Dragger
                           {...fileUploadProps(topFile, setTopFile)}
                           className="bg-blue-900/50"
+                          height={200} // Puedes ajustar la altura para que la imagen se vea bien
                         >
-                          <p className="ant-upload-drag-icon">
-                            <UploadOutlined />
-                          </p>
-                          <p className="ant-upload-text">TOP.jpg</p>
-                          <p className="ant-upload-hint">
-                            Click or drag the top view
-                          </p>
+                          {/* 💡 LÓGICA DE PREVISUALIZACIÓN PARA TOP FILE */}
+                          {topFile.length > 0 && topFile[0].preview ? (
+                            <img
+                              src={topFile[0].preview}
+                              alt="Top View Preview"
+                              className="w-full h-40 object-cover rounded"
+                            />
+                          ) : (
+                            <>
+                              <p className="ant-upload-drag-icon">
+                                <UploadOutlined />
+                              </p>
+                              <p className="ant-upload-text">TOP.jpg</p>
+                              <p className="ant-upload-hint">
+                                Click or drag the top view
+                              </p>
+                            </>
+                          )}
                         </Upload.Dragger>
                       </Col>
                       <Col span={12}>
                         <Upload.Dragger
                           {...fileUploadProps(sideFile, setSideFile)}
                           className="bg-blue-900/50"
+                          height={200} // Ajusta también la altura del Dragger lateral
                         >
-                          <p className="ant-upload-drag-icon">
-                            <UploadOutlined />
-                          </p>
-                          <p className="ant-upload-text">SIDE.jpg</p>
-                          <p className="ant-upload-hint">
-                            Click or drag the side view
-                          </p>
+                          {sideFile.length > 0 && sideFile[0].preview ? (
+                            <img
+                              src={sideFile[0].preview}
+                              alt="Side View Preview"
+                              className="w-full h-40 object-cover rounded"
+                            />
+                          ) : (
+                            <>
+                              <p className="ant-upload-drag-icon">
+                                <UploadOutlined />
+                              </p>
+                              <p className="ant-upload-text">SIDE.jpg</p>
+                              <p className="ant-upload-hint">
+                                Click or drag the side view
+                              </p>
+                            </>
+                          )}
                         </Upload.Dragger>
                       </Col>
                     </Row>
@@ -284,7 +398,7 @@ const NewMeasurement = () => {
                   </div>
                 )}
 
-                {/* Estado de Procesamiento (Síncrono) */}
+                {/* Estado de Procesamiento */}
                 {isProcessing && (
                   <div className="flex flex-col items-center justify-center space-y-4 p-8">
                     <Spin
@@ -305,50 +419,7 @@ const NewMeasurement = () => {
                 )}
 
                 {/* Estado de Resultados */}
-                {results && (
-                  <div className="space-y-6">
-                    <Title level={4} style={{ color: "#1193d4" }}>
-                      Estimated Volume:{" "}
-                      <Text strong className="text-5xl">
-                        {results.volume_ml.toFixed(3)} mL
-                      </Text>
-                    </Title>
-
-                    <Row gutter={[16, 16]}>
-                      <Col span={12}>
-                        <Card
-                          size="small"
-                          title="TOP Segmented"
-                          bodyStyle={{ padding: 0 }}
-                        >
-                          {/* 🔴 Usamos la URL devuelta por Flask */}
-                          <img
-                            alt="Segmented TOP view"
-                            src={results.top_image_url}
-                            className="w-full h-auto object-cover rounded-b"
-                          />
-                        </Card>
-                      </Col>
-                      <Col span={12}>
-                        <Card
-                          size="small"
-                          title="SIDE Segmented"
-                          bodyStyle={{ padding: 0 }}
-                        >
-                          {/* 🔴 Usamos la URL devuelta por Flask */}
-                          <img
-                            alt="Segmented SIDE view"
-                            src={results.side_image_url}
-                            className="w-full h-auto object-cover rounded-b"
-                          />
-                        </Card>
-                      </Col>
-                    </Row>
-                    <Button type="default" block>
-                      View Growth History
-                    </Button>
-                  </div>
-                )}
+                {results && <Results results={results} />}
               </Card>
             </Col>
           </Row>

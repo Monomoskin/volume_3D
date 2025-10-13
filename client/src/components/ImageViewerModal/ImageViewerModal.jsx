@@ -19,27 +19,29 @@ import dayjs from "dayjs";
 
 const { Title, Paragraph } = Typography;
 
-const MOCK_IMAGE_DATA = {
-  measurementId: "20240115-A1-001",
-  measurementDate: "2024-01-15",
-  topImageSrc:
+const EMPTY_DATA = {
+  "Measurement ID": "N/A",
+  "Upload Date": dayjs().toISOString(),
+  predicted_image_top_url:
     "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==",
-  sideImageSrc:
+  predicted_image_side_url:
     "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==",
 };
 
-const ImageViewerModal = ({ isVisible, onClose, data = MOCK_IMAGE_DATA }) => {
+const ImageViewerModal = ({ isVisible, onClose, data = EMPTY_DATA }) => {
   const [isLoading] = useState(false);
+  console.log(data);
+  const measurementId = data["Measurement ID"] || EMPTY_DATA["Measurement ID"];
+  const measurementDate = data["Upload Date"] || EMPTY_DATA["Upload Date"];
 
-  // Usamos las URLs temporales del último mensaje del usuario para la demostración
-  const sideImage =
-    "https://lh3.googleusercontent.com/aida-public/AB6AXuCEc4vA2dJoZ9dFgo64tKZteAjCAWTnPzLRT0c5ks7aDInodrRTrB9zGMclskoq71oV4iCpp_4HAGTkhLVvhjh1K-mzSFS7IHL2Y2i_DbDEJf1z4i1tH_jgEKxOdtDj0WkB-X9frKHynZA02Tc2kECNEPLJ6jiUBT4O8nHJHB72LebwodSXeEo7eMmpdfLDZCioNUHMlL2b7h1imRffpTHuIGFERppsVciSUkGK0mcAL5Q0OT-PAdVzqI7ND8zsDe4EuZT_2qh70hZe";
-  const topImage =
-    "https://lh3.googleusercontent.com/aida-public/AB6AXuDUG6ZFk6gKAMQ9ZgBs6A5JNKxfGLIz0DB3xh4TQ1NkSjYDnpxPSMuQG3qTqUdC9Qd68KQuTqg5uSsipVePI_7x_-vlnSWI2dlaCDmFuU72H-ho-88TBb4DUa-G4JoUjj-sre_0tINTB_8-p1uBdkGnsAJYbu3lzBbXdFYMxrJOfz3A0BOzkIAK0bKpaAdlZSt4zdOIptcUpL7QYGSqW3TASA5nK5qm6AqCAG20VHi5oeydMLAbyn6oSLxv9bc4i9TWKgJ9qPGEtL20";
-
-  // Usamos las URLs temporales si están definidas, sino usamos el mock de Base64
-  const finalTopSrc = topImage || data.topImageSrc;
-  const finalSideSrc = sideImage || data.sideImageSrc;
+  const finalTopSrc =
+    data["predicted_image_top_url"] || EMPTY_DATA["predicted_image_top_url"];
+  const finalSideSrc =
+    data["predicted_image_side_url"] || EMPTY_DATA["predicted_image_side_url"];
+  const initTopSrc =
+    data["uploaded_image_top_url"] || EMPTY_DATA["uploaded_image_top_url"];
+  const initSideSrc =
+    data["uploaded_image_side_url"] || EMPTY_DATA["uploaded_image_side_url"];
 
   const footer = (
     <Button
@@ -52,7 +54,6 @@ const ImageViewerModal = ({ isVisible, onClose, data = MOCK_IMAGE_DATA }) => {
     </Button>
   );
 
-  // Componente interno ahora usa el componente Image de Ant Design
   const ImageCard = ({ title, src, alt }) => (
     <div className="relative flex flex-col items-center">
       <Paragraph
@@ -118,32 +119,40 @@ const ImageViewerModal = ({ isVisible, onClose, data = MOCK_IMAGE_DATA }) => {
         backdropFilter: "blur(3px)",
       }}
     >
-      {/* Header */}
       <header className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-4 mb-6 -mt-2">
         <div>
           <Title level={4} className="mb-0 text-gray-900 dark:text-white">
             Images for Cell:{" "}
-            <span className="font-bold text-primary">{data.measurementId}</span>
+            <span className="font-bold text-primary">{measurementId}</span>
           </Title>
           <Paragraph className="text-sm text-gray-500 dark:text-gray-400 mb-0">
-            Measurement Date: {dayjs(data.measurementDate).format("YYYY-MM-DD")}
+            Measurement Date: {dayjs(measurementDate).format("YYYY-MM-DD")}
           </Paragraph>
         </div>
       </header>
 
-      {/* Main Content con Image.PreviewGroup */}
       <main>
         <Image.PreviewGroup>
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <ImageCard
               title="TOP VIEW"
               src={finalTopSrc}
-              alt={`Top view of measurement ${data.measurementId}`}
+              alt={`Top view of measurement ${measurementId}`}
+            />
+            <ImageCard
+              title="INITIAL TOP VIEW"
+              src={initTopSrc}
+              alt={`Side view of measurement ${measurementId}`}
             />
             <ImageCard
               title="SIDE VIEW"
               src={finalSideSrc}
-              alt={`Side view of measurement ${data.measurementId}`}
+              alt={`Side view of measurement ${measurementId}`}
+            />
+            <ImageCard
+              title="INITIAL SIDE VIEW"
+              src={initSideSrc}
+              alt={`Side view of measurement ${measurementId}`}
             />
           </div>
         </Image.PreviewGroup>

@@ -3,6 +3,7 @@ import { Spin, Alert } from "antd"; // Usamos componentes de Ant Design para el 
 import { LoadingOutlined } from "@ant-design/icons";
 import styles from "./Dashboard.module.less";
 import { getLatestEstimations, getEstimationsSummary } from "../../service/api";
+import { Link } from "react-router-dom";
 
 const LatestMeasurementsTable = ({ darkMode, data }) => {
   const tableHeadClasses = `${styles.tableHead} ${
@@ -68,12 +69,12 @@ const LatestMeasurementsTable = ({ darkMode, data }) => {
                       {parseFloat(row["Estimated Volume (mL)"]).toFixed(3)}
                     </td>
                     <td className={`${styles.tableCell} font-medium`}>
-                      <a
+                      <Link
                         className={styles.primaryLink}
-                        href={`/details/${row["Cell Name"]}`}
+                        to={`/cells/${row["Cell Name"]}`}
                       >
                         View Details
-                      </a>
+                      </Link>
                     </td>
                   </tr>
                 ))}

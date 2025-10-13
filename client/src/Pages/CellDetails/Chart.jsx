@@ -1,141 +1,150 @@
-import React, { useMemo } from "react";
-import ReactECharts from "echarts-for-react";
+import React, { useState } from "react";
+import {
+  Modal,
+  Card,
+  Typography,
+  Button,
+  Spin,
+  Tooltip,
+  Space,
+  Image,
+} from "antd";
+import {
+  CloseOutlined,
+  FullscreenOutlined,
+  ZoomInOutlined,
+  LoadingOutlined,
+} from "@ant-design/icons";
+import dayjs from "dayjs";
 
-/**
- * Componente que muestra el gráfico de volumen de crecimiento celular
- * @param {Array<Object>} history - Array de objetos con las mediciones de historial.
- * @param {string} title - Título del gráfico.
- */
-const VolumeAreaChart = ({
-  history,
-  title = "Volume (mL) vs Measurement Date",
-}) => {
-  // 1. Preparación de Datos con useMemo
-  // Usamos useMemo para asegurar que los datos solo se reprocesen cuando 'history' cambie.
-  const { dates, volumes } = useMemo(() => {
-    // Mapeamos el array de historial a dos arrays separados para ECharts
-    const dates = history.map((item) => item.date);
-    const volumes = history.map((item) => item.volume);
-    return { dates, volumes };
-  }, [history]);
+const { Title, Paragraph } = Typography;
 
-  // 2. Opciones de Configuración de ECharts
-  const option = {
-    // Título del gráfico
-    title: {
-      text: title,
-      left: "left",
-      textStyle: {
-        color: "#fff", // Color del texto
-        fontWeight: "bold",
-        fontSize: 18,
-      },
-      padding: [10, 0, 0, 0],
-    },
+const EMPTY_DATA = {
+  "Measurement ID": "N/A",
+  "Upload Date": dayjs().toISOString(),
+  predicted_image_top_url:
+    "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==",
+  predicted_image_side_url:
+    "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==",
+};
 
-    // 3. Tooltip: Activo con el eje como disparador
-    tooltip: {
-      trigger: "axis",
-      axisPointer: {
-        type: "shadow",
-      },
-      // Formato que muestra la fecha (X) y el volumen (Y)
-      formatter: function (params) {
-        const data = params[0];
-        return `${data.name}<br/>${data.seriesName}: <b>${data.value} mL</b>`;
-      },
-      backgroundColor: "rgba(50,50,50,0.7)",
-      textStyle: {
-        color: "#fff",
-      },
-    },
+const ImageViewerModal = ({ isVisible, onClose, data = EMPTY_DATA }) => {
+  const [isLoading] = useState(false);
 
-    // 4. Grid: Ocultamos la cuadrícula
-    grid: {
-      left: "3%",
-      right: "4%",
-      bottom: "3%",
-      containLabel: false,
-      show: false,
-    },
+  const measurementId = data["Measurement ID"] || EMPTY_DATA["Measurement ID"];
+  const measurementDate = data["Upload Date"] || EMPTY_DATA["Upload Date"];
 
-    // 5. Ejes X e Y: Ocultamos los ejes para el estilo limpio
-    xAxis: {
-      type: "category",
-      boundaryGap: false,
-      data: dates, // Usamos las fechas del historial
-      show: false,
-    },
-    yAxis: {
-      type: "value",
-      min: 0,
-      show: false,
-    },
+  const finalTopSrc =
+    data["predicted_image_top_url"] || EMPTY_DATA["predicted_image_top_url"];
+  const finalSideSrc =
+    data["predicted_image_side_url"] || EMPTY_DATA["predicted_image_side_url"];
 
-    // 6. Serie de Datos: Configuración del gráfico de área
-    series: [
-      {
-        name: "Volume (mL)",
-        type: "line",
-        data: volumes, // Usamos los volúmenes del historial
-        smooth: true,
+  const footer = (
+    <Button
+      key="close"
+      onClick={onClose}
+      type="primary"
+      style={{ backgroundColor: "#1193d4" }}
+    >
+      Close Viewer
+    </Button>
+  );
 
-        // Estilo de línea y color
-        lineStyle: {
-          color: "#1193d4", // Color azul ('primary')
-          width: 2,
-        },
+  const ImageCard = ({ title, src, alt }) => (
+    <div className="relative flex flex-col items-center">
+      <Paragraph
+        strong
+        className="mb-2 text-base text-gray-700 dark:text-gray-300"
+      >
+        {title}
+      </Paragraph>
+      <Card
+        className="w-full aspect-square overflow-hidden shadow-lg border-2 border-primary/20 transition-all hover:border-primary"
+        bodyStyle={{ padding: 0 }}
+        hoverable
+      >
+        {isLoading ? (
+          <div className="flex h-full items-center justify-center p-8">
+            <Spin
+              indicator={
+                <LoadingOutlined
+                  style={{ fontSize: 36, color: "#1193d4" }}
+                  spin
+                />
+              }
+            />
+          </div>
+        ) : (
+          <Image
+            alt={alt}
+            src={src}
+            className="h-full w-full object-cover transition-transform duration-300 transform"
+            preview={{
+              mask: (
+                <Space
+                  size="large"
+                  className="rounded-full bg-white/20 p-3 text-white backdrop-blur-sm"
+                >
+                  <Tooltip title="Zoom In">
+                    <ZoomInOutlined className="text-3xl" />
+                  </Tooltip>
+                  <Tooltip title="Fullscreen">
+                    <FullscreenOutlined className="text-3xl" />
+                  </Tooltip>
+                </Space>
+              ),
+              visible: !!src,
+            }}
+          />
+        )}
+      </Card>
+    </div>
+  );
 
-        // Estilo del área sombreada (gradiente azul)
-        areaStyle: {
-          opacity: 0.8,
-          color: {
-            type: "linear",
-            x: 0,
-            y: 0,
-            x2: 0,
-            y2: 1,
-            colorStops: [
-              { offset: 0, color: "#1193d4" },
-              { offset: 1, color: "rgba(255, 255, 255, 0)" },
-            ],
-          },
-        },
-
-        // Ocultamos los puntos de datos y configuramos el foco
-        showSymbol: false,
-        emphasis: {
-          focus: "series",
-        },
-      },
-    ],
-  };
-
-  // 7. Renderizado
   return (
-    <div
-      style={{
-        padding: "10px",
-        borderRadius: "8px",
+    <Modal
+      open={isVisible}
+      onCancel={onClose}
+      title={null}
+      footer={footer}
+      width={850}
+      centered
+      closeIcon={<CloseOutlined />}
+      maskStyle={{
+        backgroundColor: "rgba(0, 0, 0, 0.3)",
+        backdropFilter: "blur(3px)",
       }}
     >
-      <ReactECharts
-        option={option}
-        style={{ height: "300px", width: "100%" }}
-      />
-    </div>
+      <header className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-4 mb-6 -mt-2">
+        <div>
+          <Title level={4} className="mb-0 text-gray-900 dark:text-white">
+            Images for Cell:{" "}
+            <span className="font-bold text-primary">{measurementId}</span>
+          </Title>
+          <Paragraph className="text-sm text-gray-500 dark:text-gray-400 mb-0">
+            Measurement Date: {dayjs(measurementDate).format("YYYY-MM-DD")}
+          </Paragraph>
+        </div>
+      </header>
+
+      <main>
+        <Image.PreviewGroup>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            <ImageCard
+              title="TOP VIEW"
+              src={finalTopSrc}
+              alt={`Top view of measurement ${measurementId}`}
+            />
+            <ImageCard
+              title="SIDE VIEW"
+              src={finalSideSrc}
+              alt={`Side view of measurement ${measurementId}`}
+            />
+          </div>
+        </Image.PreviewGroup>
+      </main>
+    </Modal>
   );
 };
 
-export default VolumeAreaChart;
-
-// --- Ejemplo de Uso (En otro componente, como App.js) ---
-/* import VolumeAreaChart from './VolumeAreaChart';
-import { MOCK_CELL_DATA } from './data'; // Suponiendo que el mock está aquí
-
-const App = () => (
-    <div style={{ width: '600px', margin: '50px auto' }}>
-        
-    </div>
-);
-*/
+export default ImageViewerModal;

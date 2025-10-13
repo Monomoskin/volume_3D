@@ -1,3 +1,5 @@
+import React, { useState, useEffect, useMemo } from "react";
+import { useParams } from "react-router-dom";
 import {
   Layout,
   Card,
@@ -6,83 +8,63 @@ import {
   Typography,
   Button,
   Tag,
+  Spin,
+  Alert,
 } from "antd";
 import dayjs from "dayjs";
 import VolumeAreaChart from "./Chart";
-import { useState } from "react";
 import ImageViewerModal from "../../components/ImageViewerModal/ImageViewerModal";
+import { getCellHistory } from "../../service/api";
 
 const { Title, Text } = Typography;
 const { Content } = Layout;
 
-const MOCK_CELL_DATA = {
-  cellName: "Cell A1",
-  idCode: "20240722-A1",
-  registrationDate: "2024-07-22",
-  history: [
-    {
-      id: "1",
-      date: "2024-07-08",
-      volume: 0.8,
-      height: 2.1,
-      area: 1.4,
-      precision: "90%",
-      key: 1,
-    },
-    {
-      id: "6",
-      date: "2024-07-15",
-      volume: 1.0,
-      height: 2.3,
-      area: 1.6,
-      precision: "92%",
-      key: 2,
-    },
-    {
-      id: "7",
-      date: "2024-07-22",
-      volume: 1.2,
-      height: 2.5,
-      area: 1.8,
-      precision: "95%",
-      key: 3,
-    },
-    {
-      id: "8",
-      date: "2024-07-29",
-      volume: 1.5,
-      height: 2.8,
-      area: 2.1,
-      precision: "94%",
-      key: 4,
-    },
-    {
-      id: "9",
-      date: "2024-08-05",
-      volume: 1.9,
-      height: 3.1,
-      area: 2.5,
-      precision: "96%",
-      key: 5,
-    },
-    {
-      id: "10",
-      date: "2024-08-12",
-      volume: 2.4,
-      height: 3.5,
-      area: 3.0,
-      precision: "97%",
-      key: 6,
-    },
-  ],
-};
-
 const CellDetails = () => {
-  const { cellName, idCode, registrationDate, history } = MOCK_CELL_DATA;
+  const { id } = useParams();
+  const cellName = id; // Asumimos que el parámetro de la URL es el nombre de la célula
+  const [cellData, setCellData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentImageData, setCurrentImageData] = useState(null);
-  const openModal = (measurementData) => {
-    setCurrentImageData(measurementData);
+
+  useEffect(() => {
+    const loadHistory = async () => {
+      if (!cellName) return;
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const historyData = await getCellHistory(cellName);
+
+        if (historyData && historyData.length > 0) {
+          const firstRecord = historyData[0];
+
+          setCellData({
+            cellName: cellName,
+            idCode: cellName,
+            registrationDate: firstRecord["Upload Date"].split(" ")[0],
+            history: historyData,
+          });
+        } else {
+          setError(`No se encontraron datos para: ${cellName}.`);
+          setCellData(null);
+        }
+      } catch (err) {
+        console.log(err);
+        setError("Error al cargar los detalles de la célula.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadHistory();
+  }, [cellName]);
+
+  const openModal = (record) => {
+    setCurrentImageData(record);
     setIsModalOpen(true);
   };
 
@@ -90,42 +72,30 @@ const CellDetails = () => {
     setIsModalOpen(false);
     setCurrentImageData(null);
   };
+
   const historyColumns = [
     {
       title: "Measurement Date",
-      dataIndex: "date",
+      dataIndex: "Upload Date",
       key: "date",
-      // Formatear la fecha para que sea legible
-      render: (date) => dayjs(date).format("MMM D, YYYY"),
-      sorter: (a, b) => dayjs(a.date).valueOf() - dayjs(b.date).valueOf(),
+      render: (date) => dayjs(date).format("MMM D, YYYY HH:mm"),
+      sorter: (a, b) =>
+        dayjs(a["Upload Date"]).valueOf() - dayjs(b["Upload Date"]).valueOf(),
     },
     {
       title: "Estimated Volume (mL)",
-      dataIndex: "volume",
+      dataIndex: "Estimated Volume (mL)",
       key: "volume",
-      sorter: (a, b) => a.volume - b.volume,
-      render: (volume) => <Text strong>{volume.toFixed(2)}</Text>,
+      sorter: (a, b) => a["Estimated Volume (mL)"] - b["Estimated Volume (mL)"],
+      render: (volume) => <Text strong>{parseFloat(volume).toFixed(3)}</Text>,
     },
     {
-      title: "Height (mm)",
-      dataIndex: "height",
-      key: "height",
+      title: "Measurement ID",
+      dataIndex: "Measurement ID",
+      key: "id",
     },
-    {
-      title: "Area (mm²)",
-      dataIndex: "area",
-      key: "area",
-    },
-    {
-      title: "Precision",
-      dataIndex: "precision",
-      key: "precision",
-      render: (precision) => (
-        <Tag color={parseFloat(precision) >= 95 ? "blue" : "orange"}>
-          {precision}
-        </Tag>
-      ),
-    },
+    // NOTA: 'Precision', 'Height', y 'Area' no vienen del backend actual.
+    // Si los necesitas, deben añadirse al log.csv en Flask.
     {
       title: "Actions",
       key: "actions",
@@ -141,11 +111,72 @@ const CellDetails = () => {
       ),
     },
   ];
+
+  const sortedHistory = useMemo(() => {
+    if (!cellData) return [];
+    // Ordenar por fecha de subida (más reciente primero)
+    return cellData.history
+      .slice()
+      .sort(
+        (a, b) =>
+          dayjs(b["Upload Date"]).valueOf() - dayjs(a["Upload Date"]).valueOf()
+      );
+  }, [cellData]);
+
+  // --- Renderizado de Carga y Error ---
+  if (loading) {
+    return (
+      <Content
+        style={{
+          padding: "0 24px",
+          minHeight: "100vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <Spin size="large" tip="Loading Cell Data..." />
+      </Content>
+    );
+  }
+
+  if (error) {
+    return (
+      <Content style={{ padding: "0 24px", minHeight: "100vh" }}>
+        <Alert
+          message="Data Error"
+          description={error}
+          type="error"
+          showIcon
+          style={{ marginTop: 50 }}
+        />
+      </Content>
+    );
+  }
+
+  if (!cellData || sortedHistory.length === 0) {
+    return (
+      <Content style={{ padding: "0 24px", minHeight: "100vh" }}>
+        <Alert
+          message="No Data"
+          description={`No hay mediciones registradas para la célula ${cellName}.`}
+          type="info"
+          showIcon
+          style={{ marginTop: 50 }}
+        />
+      </Content>
+    );
+  }
+
+  const { idCode, registrationDate } = cellData;
+  const historyForChart = cellData.history;
+
+  // --- Renderizado Principal ---
   return (
     <Content style={{ padding: "0 24px", minHeight: "100vh" }}>
       <div className="max-w-7xl mx-auto py-8 space-y-8 flex flex-col gap-3">
         <h1 className="text-gray-800 text-3xl p-2 dark:text-white">
-          Cell Details: {idCode}
+          Cell Details: {cellName} ({idCode})
         </h1>
 
         <Card
@@ -174,17 +205,16 @@ const CellDetails = () => {
         <Card
           title={
             <Title level={3} className="mb-0">
-              Growth Chart
+              Growth Chart (Volume vs. Time)
             </Title>
           }
           className="shadow-lg border border-primary/20 dark:border-primary/30"
         >
           <div style={{ margin: "50px auto" }}>
-            <VolumeAreaChart history={MOCK_CELL_DATA.history} />
+            <VolumeAreaChart history={historyForChart} />
           </div>
         </Card>
 
-        {/* Card del Historial de Medidas */}
         <Card
           title={
             <Title level={3} className="mb-0">
@@ -192,22 +222,26 @@ const CellDetails = () => {
             </Title>
           }
           className="shadow-lg border border-primary/20 dark:border-primary/30"
-          bodyStyle={{ padding: 0 }} // Para que la tabla ocupe todo el ancho sin padding extra
+          bodyStyle={{ padding: 0 }}
         >
           <Table
             columns={historyColumns}
-            dataSource={history.slice().reverse()}
+            dataSource={sortedHistory}
             pagination={{ pageSize: 5 }}
             scroll={{ x: "max-content" }}
+            rowKey="Measurement ID"
             rowClassName="bg-background-light dark:bg-background-dark/50 hover:bg-primary/5 dark:hover:bg-primary/10"
           />
         </Card>
       </div>
-      <ImageViewerModal
-        isVisible={isModalOpen}
-        onClose={handleClose}
-        // data={currentImageData}
-      />
+
+      {currentImageData && (
+        <ImageViewerModal
+          isVisible={isModalOpen}
+          onClose={handleClose}
+          data={currentImageData}
+        />
+      )}
     </Content>
   );
 };
