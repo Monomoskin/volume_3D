@@ -1,0 +1,67 @@
+/* --- Barra Lateral (Aside) --- */
+.sidebar {
+  /* flex w-64 flex-col bg-white dark:bg-background-dark border-r border-gray-200 dark:border-gray-800 */
+  width: 16rem; /* w-64 */
+  display: flex;
+  flex-direction: column;
+  background-color: white;
+  border-right: 1px solid #e5e7eb; /* border-gray-200 */
+}
+
+.sidebarDark {
+  background-color: #101c22;
+  border-color: #1f2937; /* dark:border-gray-800 */
+}
+
+.sidebarHeader {
+  /* flex h-16 items-center border-b border-gray-200 dark:border-gray-800 px-6 */
+  display: flex;
+  height: 4rem;
+  align-items: center;
+  border-bottom: 1px solid #e5e7eb;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
+.sidebarHeaderDark {
+  border-color: #1f2937;
+}
+
+/* --- Elementos de Navegación --- */
+.navItem {
+  /* flex items-center gap-3 rounded px-3 py-2 text-sm font-medium */
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background-color 150ms;
+}
+
+.navItemBase {
+  color: #4b5563; /* text-gray-600 */
+}
+
+.navItemBaseDark {
+  color: #d1d5db; /* dark:text-gray-300 */
+}
+
+.navItemBase:hover {
+  background-color: #f3f4f6; /* hover:bg-gray-100 */
+}
+
+.navItemBaseDark:hover {
+  background-color: #1f2937; /* dark:hover:bg-gray-800 */
+}
+
+.navItemActive {
+  /* bg-primary/10 dark:bg-primary/20 text-primary */
+  background-color: rgba(17, 147, 212, 0.1);
+  color: #1193d4;
+}
+
+.navItemActiveDark {
+  background-color: rgba(17, 147, 212, 0.2);
+}

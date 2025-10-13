@@ -1,0 +1,82 @@
+// .body {
+//   font-family: "Inter", sans-serif;
+//   background-color: #f6f7f8;
+// }
+
+.bodyDark {
+  width: 100%;
+  flex: 1;
+  background-color: #101c22;
+}
+
+/* --- Contenedor Principal (Main) --- */
+.mainContent {
+  flex: 1;
+  padding-inline: 2rem; /* p-8 */
+  padding-block: 1rem; /* pb-4 */
+  width: 100%;
+}
+
+.contentWrapper {
+  max-width: 80rem;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* --- Tarjetas de Métricas --- */
+.metricCard {
+  /* rounded-lg bg-white dark:bg-background-dark p-6 shadow */
+  border-radius: 0.5rem;
+  background-color: white;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+}
+
+.metricCardDark {
+  background-color: #101c22;
+}
+
+/* --- Tablas --- */
+.tableContainer {
+  /* overflow-hidden shadow rounded-lg */
+  overflow: hidden;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  border-radius: 0.5rem;
+}
+
+.tableHead {
+  /* bg-gray-50 dark:bg-gray-800/50 */
+  background-color: #f9fafb;
+}
+
+.tableHeadDark {
+  background-color: rgba(31, 41, 55, 0.5);
+}
+
+.tableBody {
+  /* divide-y divide-gray-200 dark:divide-gray-800 bg-white dark:bg-background-dark */
+  background-color: white;
+  border-top: 1px solid #e5e7eb;
+}
+
+.tableBodyDark {
+  background-color: #101c22;
+  border-color: #1f2937;
+}
+
+.tableCell {
+  /* px-6 py-4 text-sm */
+  padding: 1rem 1.5rem;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.primaryLink {
+  /* text-primary hover:text-primary/80 */
+  color: #1193d4;
+  transition: color 150ms;
+}
+
+.primaryLink:hover {
+  color: rgba(17, 147, 212, 0.8);
+}
