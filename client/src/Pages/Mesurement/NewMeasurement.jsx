@@ -13,24 +13,22 @@ import {
   Col,
   Typography,
   Spin,
-  Progress,
+  Progress, // Mantener Progress por si se usa más tarde
   message,
 } from "antd";
 import {
   UploadOutlined,
   CloudUploadOutlined,
-  TableOutlined,
-  DashboardOutlined,
-  SettingOutlined,
   LoadingOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
+import { analyzeSample } from "../../service/api";
 
-const { Header, Content, Sider } = Layout;
+const { Content } = Layout;
 const { Title, Text } = Typography;
 const { Option } = Select;
 
-// Mock cell data (This would come from your Backend API)
+// Datos de celulas mock
 const MOCK_CELLS = [
   { code: "C-12345", name: "Cell Alpha" },
   { code: "C-67890", name: "Cell Beta" },
@@ -38,13 +36,14 @@ const MOCK_CELLS = [
 
 const NewMeasurement = () => {
   const [form] = Form.useForm();
-  const [selectedCell, setSelectedCell] = useState(null); // 'new' or cell code
+  const [selectedCell, setSelectedCell] = useState(null);
   const [topFile, setTopFile] = useState([]);
   const [sideFile, setSideFile] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [progress, setProgress] = useState(0);
+  // Eliminamos el estado 'progress' de la simulación
   const [results, setResults] = useState(null);
 
+  // Determina si el botón de Análisis debe estar activo
   const canAnalyze =
     ((selectedCell && selectedCell !== "new") ||
       (selectedCell === "new" &&
@@ -54,68 +53,68 @@ const NewMeasurement = () => {
     sideFile.length > 0;
 
   const onFinish = async (values) => {
-    if (!canAnalyze) return;
+    if (!canAnalyze || isProcessing) return;
 
     setIsProcessing(true);
     setResults(null);
-    setProgress(0);
-    message.info("Starting 3D analysis. This may take a few seconds...");
+    message.info("Starting 3D analysis. Waiting for backend response...");
 
     try {
-      console.log("Form data submitted:", values);
+      // 1. Obtener los archivos de imagen reales (no el array de Antd)
+      const actualTopFile = topFile[0].originFileObj || topFile[0];
+      const actualSideFile = sideFile[0].originFileObj || sideFile[0];
 
-      const interval = setInterval(() => {
-        setProgress((prev) => {
-          if (prev >= 100) {
-            clearInterval(interval);
-            return 100;
-          }
-          return prev + 10;
-        });
-      }, 300);
-
-      // Simulating backend processing time (2.5 seconds)
-      // Here you would put your actual: await fetch('http://127.0.0.1:8000/analyze-sample/', { method: 'POST', body: formData });
-      await new Promise((resolve) => setTimeout(resolve, 2500));
-      clearInterval(interval);
-
-      // Mock response from the Backend (JSON with volume and Base64 images)
-      const mockResponse = {
-        sample_key: values.idCode || selectedCell,
-        volume_ml: 12.345 + Math.random() * 2,
-        // A very small, valid Base64 placeholder image (1x1 transparent GIF)
-        top_image_b64:
-          "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==",
-        side_image_b64:
-          "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==",
-      };
-
-      setResults(mockResponse);
-      message.success(`Analysis completed for ${mockResponse.sample_key}.`);
-    } catch (error) {
-      message.error(
-        "Failed to communicate with the Backend. Check console for details."
+      // 2. 🔴 Llamada real a la API
+      const response = await analyzeSample(
+        values,
+        actualTopFile,
+        actualSideFile
       );
+
+      // 3. Almacenar la respuesta del backend
+      setResults({
+        sample_key: response.cell_name,
+        volume_ml: response.estimated_volume,
+        // 🔴 Usamos las URLs proporcionadas por Flask
+        top_image_url: response.predicted_image_top_url,
+        side_image_url: response.predicted_image_side_url,
+      });
+
+      message.success(
+        `Analysis completed for ${
+          response.cell_name
+        }. Volume: ${response.estimated_volume.toFixed(3)} mL`
+      );
+    } catch (error) {
+      const errorMessage = error.message.includes("HTTP")
+        ? "Failed to communicate with the Backend. Is the Flask server running on http://localhost:5000?"
+        : error.message;
+
+      message.error(`Analysis Failed: ${errorMessage}`);
       console.error(error);
     } finally {
       setIsProcessing(false);
-      setProgress(100);
     }
   };
 
-  // Props for the Ant Design Upload component (prevents auto-upload)
+  // Props para el componente Upload (configura el manejo de archivos)
   const fileUploadProps = (fileListState, setFileListState) => ({
     accept: ".jpg,.jpeg,.png",
     onRemove: () => setFileListState([]),
     beforeUpload: (file) => {
-      setFileListState([file]); // Only allows 1 file
-      return false; // Prevents Antd's automatic upload
+      setFileListState([file]); // Solo permite 1 archivo
+      return false; // Previene la subida automática de Antd
     },
-    fileList: fileListState,
+    fileList: fileListState.map((file) => ({
+      ...file,
+      uid: file.uid || file.name, // Asegurar uid para Antd
+      name: file.name,
+      status: "done", // Mostrar como ya cargado localmente
+    })),
     maxCount: 1,
   });
 
-  // Handles changing the Cell Select input
+  // Maneja el cambio en el selector de Célula
   const handleCellChange = (value) => {
     setSelectedCell(value);
     if (value !== "new") {
@@ -130,7 +129,7 @@ const NewMeasurement = () => {
   };
 
   return (
-    <div className="min-h-screen   font-sans">
+    <div className="min-h-screen font-sans">
       <Content
         style={{
           padding: "0 24px",
@@ -152,6 +151,7 @@ const NewMeasurement = () => {
                   onFinish={onFinish}
                   initialValues={{ photoDate: dayjs() }}
                 >
+                  {/* Selector de Célula */}
                   <Form.Item
                     label="Select Cell"
                     name="cellSelector"
@@ -172,6 +172,7 @@ const NewMeasurement = () => {
                     </Select>
                   </Form.Item>
 
+                  {/* Nombre y Código */}
                   <Form.Item
                     label="Cell Name"
                     name="cellName"
@@ -197,6 +198,7 @@ const NewMeasurement = () => {
                     <Input placeholder="e.g., C-12345" />
                   </Form.Item>
 
+                  {/* Fecha de la Foto */}
                   <Form.Item
                     label="Photo Date"
                     name="photoDate"
@@ -213,12 +215,13 @@ const NewMeasurement = () => {
                     />
                   </Form.Item>
 
+                  {/* Subida de Imágenes */}
                   <Form.Item label="Analysis Images (TOP/SIDE)" required>
                     <Row gutter={16}>
                       <Col span={12}>
                         <Upload.Dragger
                           {...fileUploadProps(topFile, setTopFile)}
-                          className=" bg-blue-900/50"
+                          className="bg-blue-900/50"
                         >
                           <p className="ant-upload-drag-icon">
                             <UploadOutlined />
@@ -232,7 +235,7 @@ const NewMeasurement = () => {
                       <Col span={12}>
                         <Upload.Dragger
                           {...fileUploadProps(sideFile, setSideFile)}
-                          className="bg-blue-50 dark:bg-blue-900/50"
+                          className="bg-blue-900/50"
                         >
                           <p className="ant-upload-drag-icon">
                             <UploadOutlined />
@@ -246,7 +249,7 @@ const NewMeasurement = () => {
                     </Row>
                   </Form.Item>
 
-                  {/* Submit Button */}
+                  {/* Botón de Submit */}
                   <Form.Item>
                     <Button
                       type="primary"
@@ -266,10 +269,10 @@ const NewMeasurement = () => {
               </Card>
             </Col>
 
-            {/* Results Column */}
+            {/* Columna de Resultados */}
             <Col xs={24} md={12}>
               <Card title="Processing Results" className="shadow-lg min-h-full">
-                {/* Initial State / Waiting */}
+                {/* Estado Inicial / Espera */}
                 {!isProcessing && !results && (
                   <div className="flex flex-col items-center justify-center p-12 text-center text-gray-500">
                     <CloudUploadOutlined
@@ -281,7 +284,7 @@ const NewMeasurement = () => {
                   </div>
                 )}
 
-                {/* Processing State */}
+                {/* Estado de Procesamiento (Síncrono) */}
                 {isProcessing && (
                   <div className="flex flex-col items-center justify-center space-y-4 p-8">
                     <Spin
@@ -295,17 +298,13 @@ const NewMeasurement = () => {
                     <Text strong className="text-lg">
                       Processing images...
                     </Text>
-                    <Progress
-                      percent={progress}
-                      status={progress === 100 ? "success" : "active"}
-                    />
                     <Text type="secondary">
                       Running Detectron2 model on the backend.
                     </Text>
                   </div>
                 )}
 
-                {/* Results State */}
+                {/* Estado de Resultados */}
                 {results && (
                   <div className="space-y-6">
                     <Title level={4} style={{ color: "#1193d4" }}>
@@ -322,9 +321,10 @@ const NewMeasurement = () => {
                           title="TOP Segmented"
                           bodyStyle={{ padding: 0 }}
                         >
+                          {/* 🔴 Usamos la URL devuelta por Flask */}
                           <img
                             alt="Segmented TOP view"
-                            src={results.top_image_b64} // Base64 string from backend
+                            src={results.top_image_url}
                             className="w-full h-auto object-cover rounded-b"
                           />
                         </Card>
@@ -335,9 +335,10 @@ const NewMeasurement = () => {
                           title="SIDE Segmented"
                           bodyStyle={{ padding: 0 }}
                         >
+                          {/* 🔴 Usamos la URL devuelta por Flask */}
                           <img
                             alt="Segmented SIDE view"
-                            src={results.side_image_b64} // Base64 string from backend
+                            src={results.side_image_url}
                             className="w-full h-auto object-cover rounded-b"
                           />
                         </Card>
