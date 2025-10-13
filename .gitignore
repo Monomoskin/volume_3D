@@ -10,9 +10,9 @@ __pycache__/
 *.pyd
 
 # Archivos generados por Detectron2
- 
+detectron2/
 *checkpoint.pth
-
+newenv/
 # Logs y bases de datos
 *.log
 *.sqlite3
