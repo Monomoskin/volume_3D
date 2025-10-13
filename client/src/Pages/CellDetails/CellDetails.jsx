@@ -45,7 +45,7 @@ const CellDetails = () => {
           setCellData({
             cellName: cellName,
             idCode: cellName,
-            registrationDate: firstRecord["Upload Date"].split(" ")[0],
+            registrationDate: firstRecord["Upload Date"],
             history: historyData,
           });
         } else {
@@ -170,11 +170,10 @@ const CellDetails = () => {
 
   const { idCode, registrationDate } = cellData;
   const historyForChart = cellData.history;
-
-  // --- Renderizado Principal ---
+  console.log(cellData);
   return (
-    <Content style={{ padding: "0 24px", minHeight: "100vh" }}>
-      <div className="max-w-7xl mx-auto py-8 space-y-8 flex flex-col gap-3">
+    <Content style={{ padding: "0 24px", minHeight: "100%" }}>
+      <div className="max-w-7xl mx-auto pb-2 space-y-6 flex flex-col gap-3">
         <h1 className="text-gray-800 text-3xl p-2 dark:text-white">
           Cell Details: {cellName} ({idCode})
         </h1>

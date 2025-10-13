@@ -97,7 +97,7 @@ def train_model(metadata):
 
     # --- PARÁMETROS CRUCIALES DE ROBUSTEZ ---
     cfg.SOLVER.BASE_LR = 0.0001 
-    cfg.SOLVER.MAX_ITER = 5000 
+    cfg.SOLVER.MAX_ITER = 6000 
     cfg.SOLVER.OPTIMIZER = "AdamW"
     cfg.SOLVER.STEPS = [] 
     

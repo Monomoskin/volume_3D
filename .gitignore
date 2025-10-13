@@ -32,3 +32,4 @@ detectron2/
 
 # Entorno virtual
 newenv/
+final_model/
