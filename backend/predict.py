@@ -62,7 +62,7 @@ def _setup_predictor():
     current_dir = os.path.dirname(os.path.abspath(__file__))
     base_path = os.path.dirname(current_dir) 
       # Asume: /volume_estimator/backend/output_train/model_final.pth
-    model_path = os.path.join(base_path, "output_train", "model_final.pth") 
+    model_path = os.path.join(current_dir, "final_model", "model_final.pth") 
     
     # Ahora apunta a: /volume_estimator/annotations/coco_annotations.json
     json_path = os.path.join(base_path, "annotations", "coco_annotations.json")

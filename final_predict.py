@@ -14,7 +14,7 @@ from detectron2.model_zoo import get_config_file
 
 # --- CONSTANTES DE CALIBRACIÓN (DEBES VERIFICAR ESTOS VALORES REALES) ---
 FRASCO_DIAMETER_MM = 90.0
-FRASCO_HEIGHT_MM =18.0
+FRASCO_HEIGHT_MM =12.0
 
 # --- 1. Helper function (Sin cambios) ---
 def find_highest_score_instance(instances, class_id):
