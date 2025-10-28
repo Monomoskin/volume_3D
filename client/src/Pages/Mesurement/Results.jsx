@@ -4,7 +4,8 @@ import { useNavigate } from "react-router-dom";
 
 const { Title, Text } = Typography;
 
-export default function Results({ results }) {
+export default function Results({ results, form }) {
+  const getId = form;
   const navigate = useNavigate();
   return (
     <div className="space-y-6">
@@ -49,7 +50,7 @@ export default function Results({ results }) {
         type="default"
         block
         onClick={() =>
-          navigate(`/cells/${results.cell_id}`, {
+          navigate(`/cells/${results.cell_name}`, {
             state: { fromResults: true },
           })
         }

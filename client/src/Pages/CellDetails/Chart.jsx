@@ -1,150 +1,169 @@
-import React, { useState } from "react";
-import {
-  Modal,
-  Card,
-  Typography,
-  Button,
-  Spin,
-  Tooltip,
-  Space,
-  Image,
-} from "antd";
-import {
-  CloseOutlined,
-  FullscreenOutlined,
-  ZoomInOutlined,
-  LoadingOutlined,
-} from "@ant-design/icons";
-import dayjs from "dayjs";
+import React, { useMemo } from "react";
+import ReactECharts from "echarts-for-react";
+import moment from "moment"; // Usaremos moment.js para un manejo fácil de fechas y ordenamiento
 
-const { Title, Paragraph } = Typography;
+/**
+ * Componente que renderiza el gráfico de área ondulada para el volumen vs. fecha.
+ * Adaptado a los estilos de las imágenes de referencia.
+ * @param {Array} data - Los datos de volumen y fecha provenientes del backend.
+ * @param {string} cellName - Opcional. Nombre de la célula para el título del gráfico.
+ */
+const CallusGrowthChart = ({ data }) => {
+  const options = useMemo(() => {
+    if (!data || data.length === 0) {
+      return {};
+    }
 
-const EMPTY_DATA = {
-  "Measurement ID": "N/A",
-  "Upload Date": dayjs().toISOString(),
-  predicted_image_top_url:
-    "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==",
-  predicted_image_side_url:
-    "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==",
-};
+    // a) Ordenar los datos por fecha de subida para asegurar que la línea sea correcta
+    const sortedData = [...data].sort(
+      (a, b) =>
+        moment(a["Upload Date"]).valueOf() - moment(b["Upload Date"]).valueOf()
+    );
 
-const ImageViewerModal = ({ isVisible, onClose, data = EMPTY_DATA }) => {
-  const [isLoading] = useState(false);
+    // b) Extraer las fechas (eje X) y los volúmenes (eje Y)
+    const dates = sortedData.map((item) =>
+      // Formato de fecha simplificado para el eje X, si es necesario, ejemplo: 'MM-DD HH:mm'
+      // O 'YYYY-MM-DD' si solo quieres la fecha
+      moment(item["Upload Date"]).format("MM-DD HH:mm")
+    );
+    const volumes = sortedData.map((item) => item["Estimated Volume (mL)"]);
 
-  const measurementId = data["Measurement ID"] || EMPTY_DATA["Measurement ID"];
-  const measurementDate = data["Upload Date"] || EMPTY_DATA["Upload Date"];
-
-  const finalTopSrc =
-    data["predicted_image_top_url"] || EMPTY_DATA["predicted_image_top_url"];
-  const finalSideSrc =
-    data["predicted_image_side_url"] || EMPTY_DATA["predicted_image_side_url"];
-
-  const footer = (
-    <Button
-      key="close"
-      onClick={onClose}
-      type="primary"
-      style={{ backgroundColor: "#1193d4" }}
-    >
-      Close Viewer
-    </Button>
-  );
-
-  const ImageCard = ({ title, src, alt }) => (
-    <div className="relative flex flex-col items-center">
-      <Paragraph
-        strong
-        className="mb-2 text-base text-gray-700 dark:text-gray-300"
-      >
-        {title}
-      </Paragraph>
-      <Card
-        className="w-full aspect-square overflow-hidden shadow-lg border-2 border-primary/20 transition-all hover:border-primary"
-        bodyStyle={{ padding: 0 }}
-        hoverable
-      >
-        {isLoading ? (
-          <div className="flex h-full items-center justify-center p-8">
-            <Spin
-              indicator={
-                <LoadingOutlined
-                  style={{ fontSize: 36, color: "#1193d4" }}
-                  spin
-                />
-              }
-            />
-          </div>
-        ) : (
-          <Image
-            alt={alt}
-            src={src}
-            className="h-full w-full object-cover transition-transform duration-300 transform"
-            preview={{
-              mask: (
-                <Space
-                  size="large"
-                  className="rounded-full bg-white/20 p-3 text-white backdrop-blur-sm"
-                >
-                  <Tooltip title="Zoom In">
-                    <ZoomInOutlined className="text-3xl" />
-                  </Tooltip>
-                  <Tooltip title="Fullscreen">
-                    <FullscreenOutlined className="text-3xl" />
-                  </Tooltip>
-                </Space>
-              ),
-              visible: !!src,
-            }}
-          />
-        )}
-      </Card>
-    </div>
-  );
+    // c) Opciones de ECharts adaptadas a los estilos de la imagen
+    return {
+      tooltip: {
+        trigger: "axis",
+        formatter: function (params) {
+          const dataPoint = params[0];
+          return `
+                        **Date:** ${moment(
+                          dataPoint.name,
+                          "MM-DD HH:mm"
+                        ).format("YYYY-MM-DD HH:mm")}<br/>
+                        **Volume:** ${dataPoint.value.toFixed(4)} mL
+                    `;
+        },
+        axisPointer: {
+          type: "shadow",
+        },
+        // Estilos del tooltip para que coincidan con la estética del cuadro
+        backgroundColor: "rgba(0, 0, 1, 1)",
+        borderColor: "#ccc",
+        borderWidth: 1,
+        textStyle: {
+          color: "#fff",
+        },
+        extraCssText: "box-shadow: 0 0 8px rgba(0, 0, 0, 0.2);",
+      },
+      grid: {
+        left: "8%", // Espacio izquierdo para el label del eje Y
+        right: "4%", // Espacio derecho para la gráfica
+        bottom: "8%", // Más espacio en la parte inferior para las fechas no rotadas
+        top: "20%", // Más espacio en la parte superior para el título
+        containLabel: true, // Asegura que las etiquetas estén dentro del grid
+      },
+      xAxis: {
+        type: "category",
+        boundaryGap: false,
+        data: dates,
+        axisLabel: {
+          interval: "auto", // Deja que ECharts decida el intervalo automáticamente
+          rotate: 0, // Sin rotación
+          showMaxLabel: true, // Asegura que la última etiqueta se muestre si hay espacio
+          showMinLabel: true, // Asegura que la primera etiqueta se muestre si hay espacio
+          color: "#666", // Color de las etiquetas del eje X
+          fontSize: 11,
+        },
+        axisTick: {
+          show: false, // Ocultar los pequeños "ticks" si el estilo lo requiere
+        },
+        axisLine: {
+          show: false, // Ocultar la línea del eje X si el estilo lo requiere
+        },
+        splitLine: {
+          show: false, // Ocultar las líneas de división verticales
+        },
+      },
+      yAxis: {
+        type: "value",
+        name: "Volumen (mL)",
+        nameLocation: "middle", // Centra el nombre del eje Y
+        nameGap: 40, // Espacio entre el nombre del eje y las etiquetas
+        axisLabel: {
+          color: "#666", // Color de las etiquetas del eje Y
+          fontSize: 11,
+        },
+        axisLine: {
+          show: false, // Ocultar la línea del eje Y
+        },
+        axisTick: {
+          show: false, // Ocultar los ticks del eje Y
+        },
+        splitLine: {
+          lineStyle: {
+            color: ["gray"], // Color de las líneas de división horizontales
+            type: "dotted",
+          },
+        },
+      },
+      series: [
+        {
+          name: "Volumen",
+          type: "line",
+          data: volumes,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: {
+            color: "#6699EE", // Un azul más claro para que coincida con la imagen
+            width: 2,
+          },
+          areaStyle: {
+            color: {
+              type: "linear",
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                {
+                  offset: 0,
+                  color: "rgba(102, 153, 238, 0.7)", // Azul claro más tenue
+                },
+                {
+                  offset: 1,
+                  color: "rgba(102, 153, 238, 0)", // Transparente
+                },
+              ],
+              global: false,
+            },
+          },
+          itemStyle: {
+            // Solo para los puntos, aunque showSymbol: false los oculta
+            color: "#6699EE",
+          },
+        },
+      ],
+    };
+  }, [data]);
 
   return (
-    <Modal
-      open={isVisible}
-      onCancel={onClose}
-      title={null}
-      footer={footer}
-      width={850}
-      centered
-      closeIcon={<CloseOutlined />}
-      maskStyle={{
-        backgroundColor: "rgba(0, 0, 0, 0.3)",
-        backdropFilter: "blur(3px)",
+    <div
+      style={{
+        width: "100%",
+        height: "400px",
+        // Elimina el padding y shadow si el contenedor padre ya los tiene o quieres que ECharts ocupe todo
+        // backgroundColor: '#fff',
+        // borderRadius: '8px',
+        // boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
       }}
     >
-      <header className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-4 mb-6 -mt-2">
-        <div>
-          <Title level={4} className="mb-0 text-gray-900 dark:text-white">
-            Images for Cell:{" "}
-            <span className="font-bold text-primary">{measurementId}</span>
-          </Title>
-          <Paragraph className="text-sm text-gray-500 dark:text-gray-400 mb-0">
-            Measurement Date: {dayjs(measurementDate).format("YYYY-MM-DD")}
-          </Paragraph>
-        </div>
-      </header>
-
-      <main>
-        <Image.PreviewGroup>
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-            <ImageCard
-              title="TOP VIEW"
-              src={finalTopSrc}
-              alt={`Top view of measurement ${measurementId}`}
-            />
-            <ImageCard
-              title="SIDE VIEW"
-              src={finalSideSrc}
-              alt={`Side view of measurement ${measurementId}`}
-            />
-          </div>
-        </Image.PreviewGroup>
-      </main>
-    </Modal>
+      <ReactECharts
+        option={options}
+        style={{ height: "100%", width: "100%" }} // Asegura que ocupe todo el espacio disponible
+        notMerge={true}
+        lazyUpdate={true}
+      />
+    </div>
   );
 };
 
-export default ImageViewerModal;
+export default CallusGrowthChart;

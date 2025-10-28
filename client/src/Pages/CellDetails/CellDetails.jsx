@@ -12,9 +12,9 @@ import {
   Alert,
 } from "antd";
 import dayjs from "dayjs";
-import VolumeAreaChart from "./Chart";
 import ImageViewerModal from "../../components/ImageViewerModal/ImageViewerModal";
 import { getCellHistory } from "../../service/api";
+import CallusGrowthChart from "./Chart";
 
 const { Title, Text } = Typography;
 const { Content } = Layout;
@@ -38,7 +38,7 @@ const CellDetails = () => {
 
       try {
         const historyData = await getCellHistory(cellName);
-
+        console.log(historyData);
         if (historyData && historyData.length > 0) {
           const firstRecord = historyData[0];
 
@@ -49,7 +49,7 @@ const CellDetails = () => {
             history: historyData,
           });
         } else {
-          setError(`No se encontraron datos para: ${cellName}.`);
+          setError(`No data found for.: ${cellName}.`);
           setCellData(null);
         }
       } catch (err) {
@@ -170,7 +170,7 @@ const CellDetails = () => {
 
   const { idCode, registrationDate } = cellData;
   const historyForChart = cellData.history;
-  console.log(cellData);
+
   return (
     <Content style={{ padding: "0 24px", minHeight: "100%" }}>
       <div className="max-w-7xl mx-auto pb-2 space-y-6 flex flex-col gap-3">
@@ -210,7 +210,7 @@ const CellDetails = () => {
           className="shadow-lg border border-primary/20 dark:border-primary/30"
         >
           <div style={{ margin: "50px auto" }}>
-            <VolumeAreaChart history={historyForChart} />
+            <CallusGrowthChart data={historyForChart} />
           </div>
         </Card>
 

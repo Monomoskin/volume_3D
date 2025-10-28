@@ -19,6 +19,7 @@ import {
   UploadOutlined,
   CloudUploadOutlined,
   LoadingOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { analyzeSample, getEstimationsSummary } from "../../service/api";
@@ -224,7 +225,13 @@ const NewMeasurement = () => {
   // -------------------------------------------------------------------
   // RENDERIZADO PRINCIPAL
   // -------------------------------------------------------------------
-
+  const refresh = () => {
+    form.resetFields();
+    setTopFile([]);
+    setSideFile([]);
+    setResults(null);
+    message.info("Form has been reset. You can analyze a new measurement.");
+  };
   return (
     <div className="min-h-screen font-sans">
       <Content
@@ -300,9 +307,9 @@ const NewMeasurement = () => {
                     <DatePicker
                       className="w-full"
                       format="YYYY-MM-DD"
-                      disabledDate={(current) =>
-                        current && current > dayjs().endOf("day")
-                      }
+                      // disabledDate={(current) =>
+                      //   current && current > dayjs().endOf("day")
+                      // }
                     />
                   </Form.Item>
 
@@ -365,19 +372,34 @@ const NewMeasurement = () => {
 
                   {/* Botón de Submit */}
                   <Form.Item>
-                    <Button
-                      type="primary"
-                      htmlType="submit"
-                      size="large"
-                      className="w-full"
-                      icon={<CloudUploadOutlined />}
-                      loading={isProcessing}
-                      disabled={!canAnalyze}
-                    >
-                      {isProcessing
-                        ? "Analyzing..."
-                        : "Analyze and Save Measurement"}
-                    </Button>
+                    {!results && (
+                      <Button
+                        type="primary"
+                        htmlType="submit"
+                        size="large"
+                        className="w-full"
+                        icon={<CloudUploadOutlined />}
+                        loading={isProcessing}
+                        disabled={!canAnalyze}
+                      >
+                        {isProcessing
+                          ? "Analyzing..."
+                          : "Analyze and Save Measurement"}
+                      </Button>
+                    )}
+                    {results && (
+                      <Button
+                        type="primary"
+                        onClick={refresh}
+                        size="large"
+                        className="w-full bg-orange-400"
+                        icon={<ReloadOutlined />}
+                      >
+                        {isProcessing
+                          ? "Analyzing..."
+                          : "Refresh to Analyze Again"}
+                      </Button>
+                    )}
                   </Form.Item>
                 </Form>
               </Card>
@@ -419,7 +441,7 @@ const NewMeasurement = () => {
                 )}
 
                 {/* Estado de Resultados */}
-                {results && <Results results={results} />}
+                {results && <Results results={results} form={form} />}
               </Card>
             </Col>
           </Row>
