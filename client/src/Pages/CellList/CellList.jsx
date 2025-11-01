@@ -137,7 +137,7 @@ const CellList = () => {
       <div className="max-w-7xl mx-auto py-8">
         <div className="mb-6">
           <Title level={2} className="text-slate-900 dark:text-white">
-            Registered Cells 🧬
+            Registered Cells
           </Title>
         </div>
 

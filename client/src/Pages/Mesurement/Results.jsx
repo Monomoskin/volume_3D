@@ -1,16 +1,13 @@
-import React from "react";
 import { Button, Card, Row, Col, Typography, Image } from "antd";
 import { useNavigate } from "react-router-dom";
-
 const { Title, Text } = Typography;
 
-export default function Results({ results, form }) {
-  const getId = form;
+export default function Results({ results }) {
   const navigate = useNavigate();
   return (
     <div className="space-y-6">
       <Title level={4} style={{ color: "#1193d4" }}>
-        Estimated Volume:{" "}
+        Estimated Volume:
         <Text strong className="text-5xl">
           {results.volume_ml.toFixed(3)} mL
         </Text>

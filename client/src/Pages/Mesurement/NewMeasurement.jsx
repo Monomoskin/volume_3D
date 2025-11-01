@@ -243,7 +243,7 @@ const NewMeasurement = () => {
       >
         <div className="p-3">
           <h2 className="text-3xl text-white font-bold text-left">
-            New Measurement 🔬
+            New Measurement
           </h2>
 
           <Row gutter={[32, 32]} className="mt-8">
