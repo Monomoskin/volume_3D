@@ -6,12 +6,15 @@ export default function Results({ results }) {
   const navigate = useNavigate();
   return (
     <div className="space-y-6">
-      <Title level={4} style={{ color: "#1193d4" }}>
+      <div
+        className="flex gap-2 justify-center items-center text-2xl"
+        style={{ color: "#1193d4" }}
+      >
         Estimated Volume:
-        <Text strong className="text-5xl">
+        <p className="text-2xl text-green-500 font-bold flex">
           {results.volume_ml.toFixed(3)} mL
-        </Text>
-      </Title>
+        </p>
+      </div>
 
       <Row gutter={[16, 16]}>
         <Col span={12}>
@@ -43,6 +46,7 @@ export default function Results({ results }) {
           </Card>
         </Col>
       </Row>
+
       <Button
         type="default"
         block
