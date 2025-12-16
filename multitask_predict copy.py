@@ -21,7 +21,7 @@ from detectron2.modeling import ROI_HEADS_REGISTRY
 from detectron2.modeling.roi_heads import StandardROIHeads
 
 # =====================================================
-# 1️⃣ LABEL MAPS (CONSISTENTES CON TU DATASET)
+# 1️⃣ LABEL MAPS (SIN CAMBIOS)
 # =====================================================
 VOL_MAP = {"small": 0, "medium": 1, "large": 2}
 QUAL_MAP = {"good": 0, "regular": 1, "poor": 2}
@@ -34,7 +34,7 @@ INV_STAGE_MAP = {v: k for k, v in STAGE_MAP.items()}
 INV_SPECIES_MAP = {v: k for k, v in SPECIES_MAP.items()}
 
 # =====================================================
-# 2️⃣ DATASET
+# 2️⃣ DATASET (SIN CAMBIOS)
 # =====================================================
 def setup_dataset():
     dataset_name = "callus_dataset"
@@ -57,27 +57,40 @@ def setup_dataset():
     return dataset_name
 
 # =====================================================
-# 3️⃣ AUGMENTATIONS
+# 3️⃣ AUMENTACIONES MEJORADAS (DEL CÓDIGO ANTERIOR)
 # =====================================================
 def get_train_augmentations(cfg):
+    """Aumentaciones fuertes como en el código anterior que funcionaba"""
     return [
-        T.ResizeShortestEdge((512, 512), 1024, sample_style='choice'),
+        # 1. Transformaciones Geométricas Estándar
+        T.ResizeShortestEdge(
+            short_edge_length=(512, 512),
+            max_size=1024,
+            sample_style='choice'
+        ),
+        # Flip horizontal Y vertical (crucial para TOP/SIDE)
         T.RandomFlip(prob=0.5, horizontal=True),
-        T.RandomFlip(prob=0.5, vertical=True),      # ← AÑADIDO
-        T.RandomBrightness(0.6, 1.4),              # ← MÁS agresivo
-        T.RandomSaturation(0.6, 1.4),              # ← AÑADIDO
-        T.RandomContrast(0.6, 1.4),                # ← AÑADIDO
-        T.RandomRotation(angle=[-30, 30], expand=False, sample_style='choice'),  # ← AÑADIDO
-        T.RandomCrop('relative_range', (0.7, 1.0)) # ← AÑADIDO
+        T.RandomFlip(prob=0.5, vertical=True), 
+        
+        # 2. AUMENTACIÓN DE COLOR/TEXTURA (más agresiva)
+        T.RandomBrightness(0.6, 1.4),   
+        T.RandomSaturation(0.6, 1.4),  
+        T.RandomContrast(0.6, 1.4),     
+        
+        # 3. Rotación (IMPORTANTE para generalización)
+        T.RandomRotation(angle=[-30, 30], expand=False, center=None, sample_style='choice'),
+        
+        # 4. Recorte Aleatorio (ayuda a detectar objetos parciales)
+        T.RandomCrop('relative_range', (0.7, 1.0))
     ]
 
-
 # =====================================================
-# 4️⃣ DATASET MAPPER (LEE attributes)
+# 4️⃣ DATASET MAPPER (USANDO NUEVAS AUMENTACIONES)
 # =====================================================
 class CallusDatasetMapper(DatasetMapper):
     def __init__(self, cfg, is_train=True):
-        super().__init__(cfg, is_train, augmentations=get_train_augmentations())
+        # ← CAMBIO: Usa las aumentaciones fuertes
+        super().__init__(cfg, is_train, augmentations=get_train_augmentations(cfg))
 
     def __call__(self, dataset_dict):
         dataset_dict = dataset_dict.copy()
@@ -108,7 +121,6 @@ class CallusDatasetMapper(DatasetMapper):
             species.append(SPECIES_MAP.get(str(attr.get("species", "Phyllostachys edulis")), 0))
             stages.append(STAGE_MAP.get(str(attr.get("stage", "early")), 0))
 
-
         instances.gt_boxes = Boxes(
             BoxMode.convert(torch.tensor(boxes, dtype=torch.float32), BoxMode.XYWH_ABS, BoxMode.XYXY_ABS)
         )
@@ -126,7 +138,7 @@ class CallusDatasetMapper(DatasetMapper):
         return dataset_dict
 
 # =====================================================
-# 5️⃣ ROI HEADS MULTITAREA
+# 5️⃣ ROI HEADS MULTITAREA (SIN CAMBIOS)
 # =====================================================
 @ROI_HEADS_REGISTRY.register()
 class CallusROIHeads(StandardROIHeads):
@@ -139,20 +151,14 @@ class CallusROIHeads(StandardROIHeads):
         self.fc_stage = nn.Linear(dim, 3)
 
     def forward(self, images, features, proposals, targets=None):
-        # StandardROIHeads devuelve:
-        # - entrenamiento: (proposals, losses)
-        # - inferencia: (instances, {})
         proposals_or_instances, losses = super().forward(
             images, features, proposals, targets
         )
 
         if self.training:
-            # -------- ENTRENAMIENTO --------
-            proposals = proposals_or_instances  # lista de Instances, una por imagen
-
-            # Lista de Boxes, uno por imagen (esto es lo que quiere el pooler)
+            proposals = proposals_or_instances
             proposal_boxes = [p.proposal_boxes for p in proposals]
-            feature_list = [features[f] for f in self.in_features]  # SOLO p2..p5
+            feature_list = [features[f] for f in self.in_features]
             box_features = self.box_head(
                 self.box_pooler(feature_list, proposal_boxes)
             )
@@ -170,17 +176,13 @@ class CallusROIHeads(StandardROIHeads):
             return proposals, losses
 
         else:
-            # -------- INFERENCIA --------
-            instances = proposals_or_instances  # lista de Instances
-
+            instances = proposals_or_instances
             boxes = [inst.pred_boxes for inst in instances]
             feature_list = [features[f] for f in self.in_features]
-
             box_features = self.box_head(
                 self.box_pooler(feature_list, boxes)
             )
 
-            # Asignar predicciones multitarea
             vols = self.fc_volume(box_features).argmax(dim=1)
             quals = self.fc_quality(box_features).argmax(dim=1)
             species = self.fc_species(box_features).argmax(dim=1)
@@ -195,7 +197,7 @@ class CallusROIHeads(StandardROIHeads):
             return instances, {}
 
 # =====================================================
-# 6️⃣ TRAINER
+# 6️⃣ TRAINER HÍBRIDO (MEJOR DE AMBOS MUNDOS)
 # =====================================================
 class CallusTrainer(DefaultTrainer):
     @classmethod
@@ -205,10 +207,7 @@ class CallusTrainer(DefaultTrainer):
         )
 
 # =====================================================
-# 7️⃣ TRAIN
-# =====================================================
-# =====================================================
-# 7️⃣ TRAIN CON CHECKPOINT AUTOMÁTICO
+# 7️⃣ TRAIN OPTIMIZADO (PARÁMETROS DEL CÓDIGO QUE FUNCIONABA)
 # =====================================================
 def train(dataset_name, metadata):
     cfg = get_cfg()
@@ -216,27 +215,28 @@ def train(dataset_name, metadata):
         get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")
     )
 
+    # ← CAMBIOS CLAVE DEL CÓDIGO ANTERIOR:
     cfg.MODEL.DEVICE = "cpu"
+    cfg.DATALOADER.NUM_WORKERS = 0  # ← CRÍTICO para macOS
     cfg.MODEL.ROI_HEADS.NAME = "CallusROIHeads"
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(metadata.thing_classes)
-    cfg.DATALOADER.NUM_WORKERS = 0 
-    
+
     cfg.DATASETS.TRAIN = (dataset_name,)
     cfg.DATASETS.TEST = ()
 
-    # ← CAMBIOS OPTIMIZADOS:
-    cfg.SOLVER.IMS_PER_BATCH = 4          # ↑ De 2 a 4
-    cfg.SOLVER.BASE_LR = 0.0001 
-    cfg.SOLVER.MAX_ITER = 15000
-    cfg.SOLVER.OPTIMIZER = "AdamW"        # ← AÑADIDO
-    cfg.SOLVER.WEIGHT_DECAY = 0.0001      # ← AÑADIDO
+    # ← PARÁMETROS OPTIMIZADOS:
+    cfg.SOLVER.IMS_PER_BATCH = 4      # ← Mayor batch size
+    cfg.SOLVER.BASE_LR = 0.0001       # ← Learning rate probado
+    cfg.SOLVER.MAX_ITER = 15000       # ← MÁS iteraciones (crucial)
+    cfg.SOLVER.OPTIMIZER = "AdamW"    # ← Optimizador estable
     cfg.SOLVER.STEPS = []
-    cfg.SOLVER.CHECKPOINT_PERIOD = 1000   # ↑ De 400 a 1000 (checkpoints ~50min)
+    cfg.SOLVER.WEIGHT_DECAY = 0.0001
+    cfg.SOLVER.CHECKPOINT_PERIOD = 300  # ← Frecuencia probada
 
-    cfg.OUTPUT_DIR = "./output_train"
+    cfg.OUTPUT_DIR = "./output_callus"
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
 
-    # --- Revisar si hay checkpoint previo ---
+    # ← Sistema de checkpoint robusto (sin cambios)
     last_checkpoint_path = os.path.join(cfg.OUTPUT_DIR, "last_checkpoint")
     resume_flag = False
 

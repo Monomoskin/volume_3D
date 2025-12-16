@@ -64,10 +64,7 @@ def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output
 
     # --- IDs de clases ---
     frasco_id = category_names.index("container")
-    cell_id = category_names.index("cell")
-    species_id = category_names.index("species")
-    embryo_id = category_names.index("embryogenic_potential")
-    quality_id = category_names.index("quality")
+    cell_id = category_names.index("callus")  # o "cell" si así se llama en tu JSON
     try:
         cell_profile_id = category_names.index("cell_profile")
     except ValueError:
@@ -119,34 +116,51 @@ def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output
     cells = []
     attributes = []
 
+    # -------------------------------------------------------------
+# Extraer células y atributos multitarea del ROI head
+# -------------------------------------------------------------
+    cells = []
+
     for idx in range(len(instances_top)):
         cls_id = instances_top.pred_classes[idx].item()
+        if cls_id != cell_id:
+            continue
+
         mask = instances_top.pred_masks[idx].numpy().astype(bool)
         y_c, x_c = np.where(mask)
         center = [int(np.mean(x_c)), int(np.mean(y_c))]
 
-        if cls_id == cell_id:
-            area_mm2 = np.sum(mask) * pixels_to_mm2
-            volume_ml = area_mm2 * height_mm / 1000 if height_mm is not None else None
-            cells.append({
-                "cell_index": idx,
-                "mask": mask,
-                "center": center,
-                "volume_ml": volume_ml,
-                "area_mm2": area_mm2,
-                "height_mm": height_mm,
-                "score": instances_top.scores[idx].item(),
-                "species": None,
-                "embryogenic_potential": None,
-                "quality": None
-            })
-        elif cls_id in [species_id, embryo_id, quality_id]:
-            attributes.append({
-                "class_name": category_names[cls_id],
-                "mask": mask,
-                "center": center,
-                "score": instances_top.scores[idx].item()
-            })
+        area_mm2 = np.sum(mask) * pixels_to_mm2
+        volume_ml = area_mm2 * height_mm / 1000 if height_mm is not None else None
+
+        inst = instances_top[idx]
+
+        # Clases predichas por las cabezas multitarea (enteros 0,1,2,...)
+        vol_cls = inst.pred_volume.item()
+        qual_cls = inst.pred_quality.item()
+        species_cls = inst.pred_species.item()
+        stage_cls = inst.pred_stage.item()
+
+        # Si quieres, puedes mapear a etiquetas legibles usando tus INV_*_MAP:
+        # from train_callus_multitask import INV_VOL_MAP, INV_QUAL_MAP, INV_SPECIES_MAP, INV_STAGE_MAP
+        # vol_label = INV_VOL_MAP[vol_cls]
+        # qual_label = INV_QUAL_MAP[qual_cls]
+        # species_label = INV_SPECIES_MAP[species_cls]
+        # stage_label = INV_STAGE_MAP[stage_cls]
+
+        cells.append({
+            "cell_index": idx,
+            "mask": mask,
+            "center": center,
+            "volume_ml": volume_ml,
+            "area_mm2": area_mm2,
+            "height_mm": height_mm,
+            "score": inst.scores.item(),
+            "volume_class": vol_cls,
+            "quality_class": qual_cls,
+            "species_class": species_cls,
+            "stage_class": stage_cls,
+        })
 
     # -------------------------------------------------------------
     # Asociar atributos a la célula más cercana
@@ -171,24 +185,29 @@ def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output
     # Guardar CSV
     # -------------------------------------------------------------
     output_csv_path = os.path.join(output_base_dir, f"{sample_key}_volumes.csv")
-    fieldnames = ["cell_index","class_name","volume_ml","area_mm2","height_mm","center","score",
-                  "species","embryogenic_potential","quality"]
+    fieldnames = [
+    "cell_index","class_name","volume_ml","area_mm2","height_mm","center","score",
+    "volume_class","quality_class","species_class","stage_class"
+    ]
+
     with open(output_csv_path, "w", newline="") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         for cell in cells:
             writer.writerow({
-                "cell_index": cell["cell_index"],
-                "class_name": "cell",
-                "volume_ml": cell["volume_ml"],
-                "area_mm2": cell["area_mm2"],
-                "height_mm": cell["height_mm"],
-                "center": cell["center"],
-                "score": cell["score"],
-                "species": cell["species"],
-                "embryogenic_potential": cell["embryogenic_potential"],
-                "quality": cell["quality"]
-            })
+            "cell_index": cell["cell_index"],
+            "class_name": "callus",  # o "cell"
+            "volume_ml": cell["volume_ml"],
+            "area_mm2": cell["area_mm2"],
+            "height_mm": cell["height_mm"],
+            "center": cell["center"],
+            "score": cell["score"],
+            "volume_class": cell["volume_class"],
+            "quality_class": cell["quality_class"],
+            "species_class": cell["species_class"],
+            "stage_class": cell["stage_class"],
+        })
+
     print(f"[SAVE] CSV generado: {output_csv_path}")
 
 # --- 3. FUNCIÓN MODIFICADA: Consolidación y Análisis ---
@@ -262,7 +281,7 @@ def consolidate_results(output_base_dir, real_volume_map):
 def main():
     # --- Paths ---
     input_image_dir = "testImages"
-    model_path = "output_train/model_final.pth" 
+    model_path = "output_callus/model_final.pth" 
     output_base_dir = "output_predict"
     os.makedirs(output_base_dir, exist_ok=True)
 
@@ -321,13 +340,15 @@ def main():
 
     # --- Predictor Configuration ---
     cfg = get_cfg()
-    cfg.merge_from_file(get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
+    cfg.merge_from_file(
+        get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")
+    )
+
     cfg.MODEL.WEIGHTS = model_path
-    cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(category_names)
-    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.80 
+    cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(category_names)  # ✅ SÍ, ESTO ES CORRECTO
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.7
     cfg.MODEL.DEVICE = "cpu"
     predictor = DefaultPredictor(cfg)
-
     # -------------------------------------------------------------
     # ITERAR POR MUESTRA ÚNICA
     # -------------------------------------------------------------
