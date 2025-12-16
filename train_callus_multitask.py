@@ -3,39 +3,50 @@ import json
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from detectron2.structures import Boxes, BitMasks
-import cv2
-from detectron2.data.detection_utils import read_image
+
 from detectron2.config import get_cfg
-from detectron2.engine import DefaultTrainer, DefaultPredictor
-from detectron2.data import (
-    DatasetMapper,
-    build_detection_train_loader,
-    MetadataCatalog
-)
-from detectron2.data.datasets import register_coco_instances
-from detectron2.data import transforms as T
-from detectron2.structures import BoxMode, Instances, BitMasks
+from detectron2.engine import DefaultTrainer
 from detectron2.model_zoo import get_config_file
 from detectron2.modeling import ROI_HEADS_REGISTRY
 from detectron2.modeling.roi_heads import StandardROIHeads
 
-# =====================================================
-# 1️⃣ LABEL MAPS (CONSISTENTES CON TU DATASET)
-# =====================================================
-VOL_MAP = {"small": 0, "medium": 1, "large": 2}
-QUAL_MAP = {"good": 0, "regular": 1, "poor": 2}
-STAGE_MAP = {"early": 0, "middle": 1, "advanced": 2}
-SPECIES_MAP = {"Phyllostachys edulis": 0, "Other": 1}
+from detectron2.data import (
+    DatasetMapper,
+    build_detection_train_loader,
+    MetadataCatalog,
+)
+from detectron2.data.datasets import register_coco_instances
+from detectron2.data import transforms as T
+from detectron2.data.detection_utils import read_image
 
-INV_VOL_MAP = {v: k for k, v in VOL_MAP.items()}
+from detectron2.structures import (
+    Boxes,
+    Instances,
+    BitMasks,
+    BoxMode,
+)
+
+QUAL_MAP = {
+    "good": 0,
+    "regular": 1,
+    "poor": 2,
+}
+
+STAGE_MAP = {
+    "early": 0,
+    "middle": 1,
+    "advanced": 2,
+}
+
+SPECIES_MAP = {
+    "Phyllostachys edulis": 0,
+    "Other": 1,
+}
+
 INV_QUAL_MAP = {v: k for k, v in QUAL_MAP.items()}
 INV_STAGE_MAP = {v: k for k, v in STAGE_MAP.items()}
 INV_SPECIES_MAP = {v: k for k, v in SPECIES_MAP.items()}
 
-# =====================================================
-# 2️⃣ DATASET
-# =====================================================
 def setup_dataset():
     dataset_name = "callus_dataset"
     json_path = "annotations/coco_annotations.json"
@@ -56,45 +67,54 @@ def setup_dataset():
     print(f"Dataset '{dataset_name}' registrado.")
     return dataset_name
 
-# =====================================================
-# 3️⃣ AUGMENTATIONS
-# =====================================================
 def get_train_augmentations(cfg):
     return [
-        T.ResizeShortestEdge((512, 512), 1024, sample_style='choice'),
-        T.RandomFlip(prob=0.5, horizontal=True),
-        T.RandomFlip(prob=0.5, vertical=True),      # ← AÑADIDO
-        T.RandomBrightness(0.6, 1.4),              # ← MÁS agresivo
-        T.RandomSaturation(0.6, 1.4),              # ← AÑADIDO
-        T.RandomContrast(0.6, 1.4),                # ← AÑADIDO
-        T.RandomRotation(angle=[-30, 30], expand=False, sample_style='choice'),  # ← AÑADIDO
-        T.RandomCrop('relative_range', (0.7, 1.0)) # ← AÑADIDO
+        T.ResizeShortestEdge(
+            short_edge_length=(512, 512),
+            max_size=1024,
+            sample_style="choice",
+        ),
+        T.RandomFlip(prob=0.5, horizontal=True),  # flip horizontal
+        T.RandomFlip(prob=0.5, horizontal=True), # flip vertical
+        T.RandomBrightness(0.6, 1.4),
+        T.RandomContrast(0.6, 1.4),
+        T.RandomSaturation(0.6, 1.4),
+        T.RandomRotation(angle=[-30, 30]),
+        T.RandomCrop("relative_range", (0.7, 1.0)),
     ]
 
-
-# =====================================================
-# 4️⃣ DATASET MAPPER (LEE attributes)
-# =====================================================
 class CallusDatasetMapper(DatasetMapper):
     def __init__(self, cfg, is_train=True):
-        super().__init__(cfg, is_train, augmentations=get_train_augmentations())
+        super().__init__(
+            cfg,
+            is_train,
+            augmentations=get_train_augmentations(cfg),
+        )
 
     def __call__(self, dataset_dict):
         dataset_dict = dataset_dict.copy()
-        image = read_image(dataset_dict["file_name"], format=self.image_format)
+
+        image = read_image(
+            dataset_dict["file_name"],
+            format=self.image_format,
+        )
+
         aug_input = T.AugInput(image)
-        transforms = self.augmentations(aug_input)
+        self.augmentations(aug_input)
         image = aug_input.image
 
-        dataset_dict["image"] = torch.as_tensor(image.transpose(2, 0, 1))
+        dataset_dict["image"] = torch.as_tensor(
+            image.transpose(2, 0, 1),
+            dtype=torch.float32,
+        )
 
-        if "annotations" not in dataset_dict:
-            return dataset_dict
+        if "annotations" not in dataset_dict or len(dataset_dict["annotations"]) == 0:
+            return None
 
         instances = Instances(image.shape[:2])
 
         boxes, classes, masks = [], [], []
-        volumes, qualities, species, stages = [], [], [], []
+        qualities, species, stages = [], [], []
 
         for ann in dataset_dict["annotations"]:
             boxes.append(ann["bbox"])
@@ -103,162 +123,174 @@ class CallusDatasetMapper(DatasetMapper):
 
             attr = ann.get("attributes", {})
 
-            volumes.append(VOL_MAP.get(str(attr.get("volume", "small")), 0))
-            qualities.append(QUAL_MAP.get(str(attr.get("quality", "good")), 0))
-            species.append(SPECIES_MAP.get(str(attr.get("species", "Phyllostachys edulis")), 0))
-            stages.append(STAGE_MAP.get(str(attr.get("stage", "early")), 0))
-
+            qualities.append(
+                QUAL_MAP.get(attr.get("quality", "good"), 0)
+            )
+            species.append(
+                SPECIES_MAP.get(
+                    attr.get("species", "Phyllostachys edulis"), 0
+                )
+            )
+            stages.append(
+                STAGE_MAP.get(attr.get("stage", "early"), 0)
+            )
 
         instances.gt_boxes = Boxes(
-            BoxMode.convert(torch.tensor(boxes, dtype=torch.float32), BoxMode.XYWH_ABS, BoxMode.XYXY_ABS)
+            BoxMode.convert(
+                torch.tensor(boxes, dtype=torch.float32),
+                BoxMode.XYWH_ABS,
+                BoxMode.XYXY_ABS,
+            )
         )
+
         instances.gt_classes = torch.tensor(classes, dtype=torch.int64)
-        instances.gt_volume = torch.tensor(volumes, dtype=torch.int64)
         instances.gt_quality = torch.tensor(qualities, dtype=torch.int64)
         instances.gt_species = torch.tensor(species, dtype=torch.int64)
         instances.gt_stage = torch.tensor(stages, dtype=torch.int64)
 
         instances.gt_masks = BitMasks.from_polygon_masks(
-            masks, image.shape[0], image.shape[1]
+            masks,
+            image.shape[0],
+            image.shape[1],
         )
 
         dataset_dict["instances"] = instances
         return dataset_dict
 
-# =====================================================
-# 5️⃣ ROI HEADS MULTITAREA
-# =====================================================
 @ROI_HEADS_REGISTRY.register()
 class CallusROIHeads(StandardROIHeads):
     def __init__(self, cfg, input_shape):
         super().__init__(cfg, input_shape)
+
         dim = self.box_head._output_size
-        self.fc_volume = nn.Linear(dim, 3)
+
         self.fc_quality = nn.Linear(dim, 3)
         self.fc_species = nn.Linear(dim, 2)
         self.fc_stage = nn.Linear(dim, 3)
 
     def forward(self, images, features, proposals, targets=None):
-        # StandardROIHeads devuelve:
-        # - entrenamiento: (proposals, losses)
-        # - inferencia: (instances, {})
         proposals_or_instances, losses = super().forward(
             images, features, proposals, targets
         )
 
+        # ---------------- TRAIN ----------------
         if self.training:
-            # -------- ENTRENAMIENTO --------
-            proposals = proposals_or_instances  # lista de Instances, una por imagen
+            proposals = proposals_or_instances
 
-            # Lista de Boxes, uno por imagen (esto es lo que quiere el pooler)
-            proposal_boxes = [p.proposal_boxes for p in proposals]
-            feature_list = [features[f] for f in self.in_features]  # SOLO p2..p5
             box_features = self.box_head(
-                self.box_pooler(feature_list, proposal_boxes)
+                self.box_pooler(
+                    [features[f] for f in self.in_features],
+                    [p.proposal_boxes for p in proposals],
+                )
             )
-
-            gt_volume = torch.cat([p.gt_volume for p in proposals])
-            gt_quality = torch.cat([p.gt_quality for p in proposals])
-            gt_species = torch.cat([p.gt_species for p in proposals])
-            gt_stage = torch.cat([p.gt_stage for p in proposals])
-
-            losses["loss_volume"] = F.cross_entropy(self.fc_volume(box_features), gt_volume)
-            losses["loss_quality"] = F.cross_entropy(self.fc_quality(box_features), gt_quality)
-            losses["loss_species"] = F.cross_entropy(self.fc_species(box_features), gt_species)
-            losses["loss_stage"] = F.cross_entropy(self.fc_stage(box_features), gt_stage)
-
+            if "loss_quality" in losses:
+                losses["loss_quality"] *= 0.3
+            if "loss_quality" in losses:
+                losses["loss_quality"] *= 0.3
+            if "loss_species" in losses:
+                losses["loss_species"] *= 0.3
+            if "loss_stage" in losses:
+                losses["loss_stage"] *= 0.3
             return proposals, losses
 
-        else:
-            # -------- INFERENCIA --------
-            instances = proposals_or_instances  # lista de Instances
+        # ---------------- INFERENCE ----------------
+        instances = proposals_or_instances
 
-            boxes = [inst.pred_boxes for inst in instances]
-            feature_list = [features[f] for f in self.in_features]
-
-            box_features = self.box_head(
-                self.box_pooler(feature_list, boxes)
-            )
-
-            # Asignar predicciones multitarea
-            vols = self.fc_volume(box_features).argmax(dim=1)
-            quals = self.fc_quality(box_features).argmax(dim=1)
-            species = self.fc_species(box_features).argmax(dim=1)
-            stages = self.fc_stage(box_features).argmax(dim=1)
-
-            for inst, v, q, s, st in zip(instances, vols, quals, species, stages):
-                inst.pred_volume = v
-                inst.pred_quality = q
-                inst.pred_species = s
-                inst.pred_stage = st
-
+        boxes = [i.pred_boxes for i in instances if len(i) > 0]
+        if len(boxes) == 0:
             return instances, {}
 
-# =====================================================
-# 6️⃣ TRAINER
-# =====================================================
+        box_features = self.box_head(
+            self.box_pooler(
+                [features[f] for f in self.in_features],
+                boxes,
+            )
+        )
+
+
+        start = 0
+        for inst in instances:
+            n = len(inst)
+            if n == 0:
+                continue
+
+            inst.pred_quality = self.fc_quality(
+                box_features[start:start+n]
+            ).argmax(1)
+
+            inst.pred_species = self.fc_species(
+                box_features[start:start+n]
+            ).argmax(1)
+
+            inst.pred_stage = self.fc_stage(
+                box_features[start:start+n]
+            ).argmax(1)
+
+            start += n
+
+
+        return instances, {}
+
 class CallusTrainer(DefaultTrainer):
     @classmethod
     def build_train_loader(cls, cfg):
         return build_detection_train_loader(
-            cfg, mapper=CallusDatasetMapper(cfg, True)
+            cfg,
+            mapper=CallusDatasetMapper(cfg, is_train=True),
         )
 
-# =====================================================
-# 7️⃣ TRAIN
-# =====================================================
-# =====================================================
-# 7️⃣ TRAIN CON CHECKPOINT AUTOMÁTICO
-# =====================================================
-def train(dataset_name, metadata):
+def train(dataset_name):
     cfg = get_cfg()
     cfg.merge_from_file(
-        get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")
+        get_config_file(
+            "COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"
+        )
     )
 
     cfg.MODEL.DEVICE = "cpu"
     cfg.MODEL.ROI_HEADS.NAME = "CallusROIHeads"
-    cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(metadata.thing_classes)
-    cfg.DATALOADER.NUM_WORKERS = 0 
-    
+    cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(
+        MetadataCatalog.get(dataset_name).thing_classes
+    )
+
     cfg.DATASETS.TRAIN = (dataset_name,)
     cfg.DATASETS.TEST = ()
 
-    # ← CAMBIOS OPTIMIZADOS:
-    cfg.SOLVER.IMS_PER_BATCH = 4          # ↑ De 2 a 4
-    cfg.SOLVER.BASE_LR = 0.0001 
-    cfg.SOLVER.MAX_ITER = 15000
-    cfg.SOLVER.OPTIMIZER = "AdamW"        # ← AÑADIDO
-    cfg.SOLVER.WEIGHT_DECAY = 0.0001      # ← AÑADIDO
+    cfg.DATALOADER.NUM_WORKERS = 0
+
+    cfg.SOLVER.IMS_PER_BATCH = 2
+    cfg.SOLVER.BASE_LR = 1e-4
+    cfg.SOLVER.MAX_ITER = 4000
+    cfg.SOLVER.OPTIMIZER = "AdamW"
     cfg.SOLVER.STEPS = []
-    cfg.SOLVER.CHECKPOINT_PERIOD = 1000   # ↑ De 400 a 1000 (checkpoints ~50min)
+    cfg.SOLVER.CHECKPOINT_PERIOD = 300
 
     cfg.OUTPUT_DIR = "./output_train"
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
 
-    # --- Revisar si hay checkpoint previo ---
-    last_checkpoint_path = os.path.join(cfg.OUTPUT_DIR, "last_checkpoint")
-    resume_flag = False
+    trainer = CallusTrainer(cfg)
 
-    if os.path.exists(last_checkpoint_path):
-        with open(last_checkpoint_path, "r") as f:
-            last_model = f.read().strip()
-        cfg.MODEL.WEIGHTS = last_model
-        resume_flag = True
-        print(f"🔁 Reanudando desde checkpoint: {last_model}")
+    # --- Manejo explícito de checkpoint ---
+    last_checkpoint_file = os.path.join(cfg.OUTPUT_DIR, "last_checkpoint")
+    resume_flag = False
+    if os.path.exists(last_checkpoint_file):
+        last_model_path = open(last_checkpoint_file, "r").read().strip()
+        if os.path.exists(last_model_path):
+            cfg.MODEL.WEIGHTS = last_model_path
+            resume_flag = True
+            print(f"🔁 Reanudando desde checkpoint: {last_model_path}")
+        else:
+            print("⚠️  Se encontró last_checkpoint pero el archivo de pesos no existe. Entrenando desde cero.")
     else:
-        cfg.MODEL.WEIGHTS = (
-            "detectron2://COCO-InstanceSegmentation/"
-            "mask_rcnn_R_50_FPN_3x/137849600/model_final_f10217.pkl"
-        )
+        cfg.MODEL.WEIGHTS = "detectron2://COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x/137849600/model_final_f10217.pkl"
         print("🚀 No se encontró checkpoint previo. Entrenamiento desde cero.")
 
-    trainer = CallusTrainer(cfg)
+    # --- Iniciar entrenamiento ---
     trainer.resume_or_load(resume=resume_flag)
+    print("\n🏋️ Entrenamiento iniciado...")
     trainer.train()
+    print("✅ Entrenamiento completado.")
 
-# =====================================================
 if __name__ == "__main__":
     dataset_name = setup_dataset()
-    metadata = MetadataCatalog.get(dataset_name)
-    train(dataset_name, metadata)
+    train(dataset_name)
