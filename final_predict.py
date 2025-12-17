@@ -285,13 +285,13 @@ def consolidate_results(output_base_dir, real_volume_map):
 def main():
     # --- Paths ---
     input_image_dir = "testImages"
-    model_path = "output_train/model_final.pth" 
+    model_path = "backend/final_model/model_final.pth" 
     output_base_dir = "output_predict"
     os.makedirs(output_base_dir, exist_ok=True)
 
     # --- Dataset and Metadata Setup ---
     dataset_name = "celulas_frascos"
-    json_path = os.path.join("annotations", "coco_annotations.json")
+    json_path = os.path.join("annotations", "annotations-backup.json")
     image_dir = "images"
     try:
         register_coco_instances(dataset_name, {}, json_path, image_dir)

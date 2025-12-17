@@ -5,47 +5,36 @@ import cv2
 import numpy as np
 
 # ==============================================================================
-# ATRIBUTOS NORMALIZADOS
+# HELPERS
 # ==============================================================================
 
-DEFAULT_ATTRIBUTES = {
-    "volume": None,
-    "quality": "unknown",
-    "stage": "unknown",
-    "species": "unknown",
-}
-
-def extract_attributes(node):
+def resolve_container_label(original_label, image_name):
     """
-    Extrae y normaliza atributos desde CVAT XML
+    Separa container en container_top / container_side según el nombre de la imagen
     """
-    attrs = DEFAULT_ATTRIBUTES.copy()
+    if original_label != "container":
+        return original_label
 
-    for attr in node.findall("attribute"):
-        name = attr.get("name", "").strip()
-        value = attr.text.strip() if attr.text else "unknown"
-
-        if name == "volume":
-            try:
-                attrs["volume"] = float(value)
-            except:
-                pass
-        elif name == "Callus Quality":
-            attrs["quality"] = value
-        elif name == "Bamboo Species":
-            attrs["species"] = value
-        elif name == "Embryogenic Stage":
-            attrs["stage"] = value
-
-    return attrs
+    name = image_name.lower()
+    if "_top" in name:
+        return "container_top"
+    elif "_side" in name:
+        return "container_side"
+    else:
+        # fallback seguro
+        return "container"
 
 
-# ==============================================================================
-# POLYGON / POLYLINE
-# ==============================================================================
+def process_points_annotation(
+    node, categories, annotation_id, image_id, image_name
+):
+    """
+    Procesa nodos <polygon> o <polyline>
+    """
 
-def process_points_annotation(node, categories, annotation_id, image_id):
-    label = node.get("label")
+    raw_label = node.get("label")
+    label = resolve_container_label(raw_label, image_name)
+
     if label not in categories:
         return None, annotation_id
 
@@ -64,7 +53,7 @@ def process_points_annotation(node, categories, annotation_id, image_id):
     segmentation = [points]
     pts = np.array(points).reshape(-1, 2).astype(np.float32)
 
-    area = cv2.contourArea(pts)
+    area = float(cv2.contourArea(pts))
     x, y, w, h = cv2.boundingRect(pts)
 
     annotation = {
@@ -72,20 +61,20 @@ def process_points_annotation(node, categories, annotation_id, image_id):
         "image_id": image_id,
         "category_id": categories[label],
         "segmentation": segmentation,
-        "area": float(area),
+        "area": area,
         "bbox": [float(x), float(y), float(w), float(h)],
         "iscrowd": 0,
-        "attributes": extract_attributes(node),
     }
 
     return annotation, annotation_id + 1
 
 
 # ==============================================================================
-# MAIN CONVERTER
+# CONVERTER
 # ==============================================================================
 
 def convert_cvat_to_coco(xml_file_path, output_json_path):
+
     tree = ET.parse(xml_file_path)
     root = tree.getroot()
 
@@ -101,42 +90,66 @@ def convert_cvat_to_coco(xml_file_path, output_json_path):
     cat_id = 1
     ann_id = 1
 
-    # Categorías
+    # --------------------------------------------------
+    # CATEGORIES (FORZAMOS container_top y container_side)
+    # --------------------------------------------------
+    base_labels = []
+
     for label_node in root.findall(".//labels/label"):
         name = label_node.find("name").text
-        categories[name] = cat_id
+        base_labels.append(name)
+
+    final_labels = []
+    for lbl in base_labels:
+        if lbl == "container":
+            final_labels.extend(["container_top", "container_side"])
+        else:
+            final_labels.append(lbl)
+
+    for lbl in sorted(set(final_labels)):
+        categories[lbl] = cat_id
         coco["categories"].append({
             "id": cat_id,
-            "name": name,
+            "name": lbl,
             "supercategory": ""
         })
         cat_id += 1
 
-    # Imágenes
+    # --------------------------------------------------
+    # IMAGES + ANNOTATIONS
+    # --------------------------------------------------
     for image_node in root.findall("image"):
         image_id = int(image_node.get("id"))
+        image_name = image_node.get("name")
+
         coco["images"].append({
             "id": image_id,
-            "file_name": image_node.get("name"),
+            "file_name": image_name,
             "width": int(image_node.get("width")),
             "height": int(image_node.get("height")),
         })
 
-        # Polygon
+        # ---------- POLYGONS ----------
         for poly in image_node.findall("polygon"):
-            ann, ann_id = process_points_annotation(poly, categories, ann_id, image_id)
+            ann, ann_id = process_points_annotation(
+                poly, categories, ann_id, image_id, image_name
+            )
             if ann:
                 coco["annotations"].append(ann)
 
-        # Polyline
+        # ---------- POLYLINES ----------
         for polyline in image_node.findall("polyline"):
-            ann, ann_id = process_points_annotation(polyline, categories, ann_id, image_id)
+            ann, ann_id = process_points_annotation(
+                polyline, categories, ann_id, image_id, image_name
+            )
             if ann:
                 coco["annotations"].append(ann)
 
-        # Ellipse (container)
+        # ---------- ELLIPSES ----------
         for ellipse in image_node.findall("ellipse"):
-            label = ellipse.get("label")
+            raw_label = ellipse.get("label")
+            label = resolve_container_label(raw_label, image_name)
+
             if label not in categories:
                 continue
 
@@ -150,9 +163,10 @@ def convert_cvat_to_coco(xml_file_path, output_json_path):
                 (int(cx), int(cy)),
                 (int(rx), int(ry)),
                 int(rot),
-                0, 360, 5
+                0, 360, 3
             )
 
+            segmentation = [points.flatten().tolist()]
             x, y, w, h = cv2.boundingRect(points)
             area = float(np.pi * rx * ry)
 
@@ -160,15 +174,17 @@ def convert_cvat_to_coco(xml_file_path, output_json_path):
                 "id": ann_id,
                 "image_id": image_id,
                 "category_id": categories[label],
-                "segmentation": [points.flatten().tolist()],
+                "segmentation": segmentation,
                 "area": area,
                 "bbox": [float(x), float(y), float(w), float(h)],
                 "iscrowd": 0,
-                "attributes": DEFAULT_ATTRIBUTES.copy(),  # container también tiene attributes
             })
 
             ann_id += 1
 
+    # --------------------------------------------------
+    # SAVE
+    # --------------------------------------------------
     with open(output_json_path, "w") as f:
         json.dump(coco, f, indent=2)
 
@@ -181,6 +197,6 @@ def convert_cvat_to_coco(xml_file_path, output_json_path):
 
 if __name__ == "__main__":
     convert_cvat_to_coco(
-        "annotations/annotations-backup.xml",
-        "annotations/annotations-backup.json"
+        "annotations/annotations.xml",
+        "annotations/coco_annotations.json"
     )

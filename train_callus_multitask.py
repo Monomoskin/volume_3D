@@ -164,36 +164,56 @@ class CallusROIHeads(StandardROIHeads):
 
         dim = self.box_head._output_size
 
-        self.fc_quality = nn.Linear(dim, 3)
-        self.fc_species = nn.Linear(dim, 2)
-        self.fc_stage = nn.Linear(dim, 3)
+        # Clasificadores biológicos
+        self.fc_quality = nn.Linear(dim, 3)   # good / regular / poor
+        self.fc_species = nn.Linear(dim, 2)   # moso / other
+        self.fc_stage = nn.Linear(dim, 3)     # early / middle / advanced
 
     def forward(self, images, features, proposals, targets=None):
+        # Forward estándar de Mask R-CNN
         proposals_or_instances, losses = super().forward(
             images, features, proposals, targets
         )
 
-        # ---------------- TRAIN ----------------
+        # =========================
+        # TRAINING
+        # =========================
         if self.training:
             proposals = proposals_or_instances
 
+            # Extraer features de las cajas
             box_features = self.box_head(
                 self.box_pooler(
                     [features[f] for f in self.in_features],
                     [p.proposal_boxes for p in proposals],
                 )
             )
-            if "loss_quality" in losses:
-                losses["loss_quality"] *= 0.3
-            if "loss_quality" in losses:
-                losses["loss_quality"] *= 0.3
-            if "loss_species" in losses:
-                losses["loss_species"] *= 0.3
-            if "loss_stage" in losses:
-                losses["loss_stage"] *= 0.3
+
+            # Ground truth
+            gt_quality = torch.cat([p.gt_quality for p in proposals], dim=0)
+            gt_species = torch.cat([p.gt_species for p in proposals], dim=0)
+            gt_stage = torch.cat([p.gt_stage for p in proposals], dim=0)
+
+            # Predicciones
+            pred_quality = self.fc_quality(box_features)
+            pred_species = self.fc_species(box_features)
+            pred_stage = self.fc_stage(box_features)
+
+            # Losses biológicas
+            losses["loss_quality"] = F.cross_entropy(pred_quality, gt_quality)
+            losses["loss_species"] = F.cross_entropy(pred_species, gt_species)
+            losses["loss_stage"] = F.cross_entropy(pred_stage, gt_stage)
+
+            # Pesos (para no dominar sobre bbox/mask)
+            losses["loss_quality"] *= 0.3
+            losses["loss_species"] *= 0.3
+            losses["loss_stage"] *= 0.3
+
             return proposals, losses
 
-        # ---------------- INFERENCE ----------------
+        # =========================
+        # INFERENCE
+        # =========================
         instances = proposals_or_instances
 
         boxes = [i.pred_boxes for i in instances if len(i) > 0]
@@ -207,7 +227,6 @@ class CallusROIHeads(StandardROIHeads):
             )
         )
 
-
         start = 0
         for inst in instances:
             n = len(inst)
@@ -215,19 +234,18 @@ class CallusROIHeads(StandardROIHeads):
                 continue
 
             inst.pred_quality = self.fc_quality(
-                box_features[start:start+n]
-            ).argmax(1)
+                box_features[start:start + n]
+            ).argmax(dim=1)
 
             inst.pred_species = self.fc_species(
-                box_features[start:start+n]
-            ).argmax(1)
+                box_features[start:start + n]
+            ).argmax(dim=1)
 
             inst.pred_stage = self.fc_stage(
-                box_features[start:start+n]
-            ).argmax(1)
+                box_features[start:start + n]
+            ).argmax(dim=1)
 
             start += n
-
 
         return instances, {}
 
@@ -239,7 +257,7 @@ class CallusTrainer(DefaultTrainer):
             mapper=CallusDatasetMapper(cfg, is_train=True),
         )
 
-def train(dataset_name):
+def train(dataset_name, resume_checkpoint=None):
     cfg = get_cfg()
     cfg.merge_from_file(
         get_config_file(
@@ -260,7 +278,7 @@ def train(dataset_name):
 
     cfg.SOLVER.IMS_PER_BATCH = 2
     cfg.SOLVER.BASE_LR = 1e-4
-    cfg.SOLVER.MAX_ITER = 4000
+    cfg.SOLVER.MAX_ITER = 5000
     cfg.SOLVER.OPTIMIZER = "AdamW"
     cfg.SOLVER.STEPS = []
     cfg.SOLVER.CHECKPOINT_PERIOD = 300
@@ -270,20 +288,22 @@ def train(dataset_name):
 
     trainer = CallusTrainer(cfg)
 
-    # --- Manejo explícito de checkpoint ---
-    last_checkpoint_file = os.path.join(cfg.OUTPUT_DIR, "last_checkpoint")
+    # --- Manejo de checkpoints ---
     resume_flag = False
-    if os.path.exists(last_checkpoint_file):
-        last_model_path = open(last_checkpoint_file, "r").read().strip()
-        if os.path.exists(last_model_path):
-            cfg.MODEL.WEIGHTS = last_model_path
-            resume_flag = True
-            print(f"🔁 Reanudando desde checkpoint: {last_model_path}")
-        else:
-            print("⚠️  Se encontró last_checkpoint pero el archivo de pesos no existe. Entrenando desde cero.")
+    if resume_checkpoint and os.path.exists(resume_checkpoint):
+        # Si se especifica un checkpoint concreto
+        trainer.resume_or_load(resume=False)
+        trainer.checkpointer.load(resume_checkpoint)
+        print(f"🔁 Reanudando desde checkpoint específico: {resume_checkpoint}")
     else:
-        cfg.MODEL.WEIGHTS = "detectron2://COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x/137849600/model_final_f10217.pkl"
-        print("🚀 No se encontró checkpoint previo. Entrenamiento desde cero.")
+        # Buscar automáticamente el último checkpoint guardado por Detectron2
+        last_checkpoint = trainer.checkpointer.get_checkpoint_file()
+        if last_checkpoint and os.path.exists(last_checkpoint):
+            resume_flag = True
+            print(f"🔁 Reanudando desde último checkpoint detectado: {last_checkpoint}")
+        else:
+            cfg.MODEL.WEIGHTS = "detectron2://COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x/137849600/model_final_f10217.pkl"
+            print("🚀 No se encontró checkpoint previo. Entrenamiento desde cero.")
 
     # --- Iniciar entrenamiento ---
     trainer.resume_or_load(resume=resume_flag)
