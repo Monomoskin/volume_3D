@@ -33,3 +33,4 @@ detectron2/
 # Entorno virtual
 newenv/
 final_model/
+output_train_attr/

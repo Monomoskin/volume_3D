@@ -10,11 +10,13 @@ from detectron2.data import MetadataCatalog
 from detectron2.data.datasets import register_coco_instances
 from detectron2.utils.visualizer import Visualizer, ColorMode
 from detectron2.model_zoo import get_config_file
-
+from detectron2.structures import Instances
+from detectron2.engine import DefaultPredictor
+from roi_heads import CallusROIHeads 
 # --- CONSTANTES DE CALIBRACIÓN (DEBES VERIFICAR ESTOS VALORES REALES) ---
 FRASCO_DIAMETER_MM = 90.0
 FRASCO_HEIGHT_MM = 12.0
-
+predicted_attributes = {}
 # --- 1. Helper: Obtener la instancia con mayor score de una clase ---
 def find_highest_score_instance(instances, class_id):
     if len(instances) == 0:
@@ -26,7 +28,7 @@ def find_highest_score_instance(instances, class_id):
         return None
     best_idx = class_indices[torch.argmax(scores[class_indices])]
     
-    from detectron2.structures import Instances
+    
     best_instance = Instances(instances.image_size)
     best_instance.pred_masks = instances.pred_masks[best_idx:best_idx+1]
     best_instance.pred_classes = instances.pred_classes[best_idx:best_idx+1]
@@ -143,8 +145,36 @@ def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output
     y_c, x_c = np.where(cell_mask)
     center_x, center_y = int(np.mean(x_c)), int(np.mean(y_c))
 
+    # --- Guardar atributos predichos para Excel ---
+    class_id = instances_top.pred_classes[best_cell].item()
+    class_name = category_names[class_id]
+
+    # Solo si la clase es callus, agregamos atributos
+    class_name = category_names[instances_top.pred_classes[best_cell].item()]
+
+    if class_name == "callus":
+        species = metadata.species_classes[instances_top.pred_species[best_cell].item()]
+        quality = metadata.quality_classes[instances_top.pred_quality[best_cell].item()]
+        stage = metadata.stage_classes[instances_top.pred_stage[best_cell].item()]
+    else:
+        species, quality, stage = None, None, None
+    # Guardar atributos predichos para consolidación y visualización
+    predicted_attributes[sample_key] = {
+        "species": species,
+        "quality": quality,
+        "stage": stage,
+        "score": round(best_score, 3),
+        "volume_ml": volumen_ml,
+        "area_mm2": area_mm2,
+        "height_mm": height_real_mm
+    }
+
     volume_results = [{
-        "class_name": category_names[instances_top.pred_classes[best_cell].item()],
+        "sample_key": sample_key,
+        "class_name": class_name,
+        "species": species,
+        "quality": quality,
+        "stage": stage,
         "volume_ml": volumen_ml,
         "area_mm2": area_mm2,
         "height_mm": height_real_mm,
@@ -157,7 +187,39 @@ def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output
     for view, im, instances, fname in [("TOP", im_top, instances_top, f"{sample_key}_TOP_predicted.jpg"),
                                        ("SIDE", im_side, instances_side, f"{sample_key}_SIDE_predicted.jpg")]:
         v = Visualizer(im[:, :, ::-1], metadata, scale=1.0, instance_mode=ColorMode.SEGMENTATION)
-        out = v.draw_instance_predictions(instances)
+        instances = instances.to("cpu")
+
+        for i in range(len(instances)):
+            mask = instances.pred_masks[i].numpy()
+            class_id = instances.pred_classes[i].item()
+            class_name = metadata.thing_classes[class_id]
+            score = instances.scores[i].item()
+
+            # Dibujar máscara
+            v.draw_binary_mask(mask, alpha=0.6)
+
+            # Centro
+            ys, xs = np.where(mask)
+            if len(xs) == 0:
+                continue
+            cx, cy = int(xs.mean()), int(ys.mean())
+
+        if sample_key in predicted_attributes:
+            attr = predicted_attributes[sample_key]
+            full_text = f"{class_name} | {attr['species']} | {attr['quality']} | {attr['stage']}\nscore: {attr['score']:.2f}\nvol: {attr['volume_ml']:.2f} mL"
+        else:
+            full_text = f"{class_name}\nscore: {instances_top.scores[i].item():.2f}"
+
+        v.draw_text(
+            full_text,
+            (cx, cy),
+            font_size=10,
+            color="white",
+            horizontal_alignment="center"
+        )
+
+
+        out = v.output
         cv2.imwrite(os.path.join(output_base_dir, fname), out.get_image()[:, :, ::-1])
 
     # --- Guardar CSV ---
@@ -167,38 +229,57 @@ def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output
     print(f"[SAVE] CSV guardado para {sample_key}")
 
 # --- 3. Consolidación de resultados ---
-def consolidate_results(output_base_dir, real_volume_map):
-    all_files = [os.path.join(output_base_dir, f) for f in os.listdir(output_base_dir) if f.endswith('_volumes.csv')]
-    if not all_files:
-        print("No CSV files found.")
-        return
+def consolidate_results(output_base_dir, real_volume_map, predicted_attributes):
+    all_rows = []
 
-    all_data = []
-    for f in all_files:
-        df = pd.read_csv(f)
-        sample_key = os.path.basename(f).replace('_volumes.csv', '')
-        df.insert(0, 'sample_key', sample_key)
-        all_data.append(df)
+    for sample_key, attr in predicted_attributes.items():
+        row = {
+            "sample_key": sample_key,
+            "species": attr["species"],
+            "quality": attr["quality"],
+            "stage": attr["stage"],
+            "score": attr["score"],
+            "volume_ml": attr["volume_ml"],
+            "area_mm2": attr["area_mm2"],
+            "height_mm": attr["height_mm"],
+            "real_volume_ml": real_volume_map.get(sample_key, np.nan)
+        }
+        row["error_abs_ml"] = abs(row["volume_ml"] - row["real_volume_ml"]) if not np.isnan(row["real_volume_ml"]) else np.nan
+        row["precision_percent"] = (1 - row["error_abs_ml"] / row["real_volume_ml"])*100 if not np.isnan(row["real_volume_ml"]) else np.nan
+        all_rows.append(row)
 
-    master_df = pd.concat(all_data, ignore_index=True)
-    master_df['real_volume_ml'] = master_df['sample_key'].apply(lambda x: real_volume_map.get(x, np.nan))
-    master_df['error_abs_ml'] = np.abs(master_df['volume_ml'] - master_df['real_volume_ml'])
-    master_df['precision_percent'] = (1 - (master_df['error_abs_ml'] / master_df['real_volume_ml'])) * 100
-
+    df = pd.DataFrame(all_rows)
     master_csv_path = os.path.join(output_base_dir, 'all_volumes_summary.xlsx')
-    master_df.to_excel(master_csv_path, index=False)
+    df.to_excel(master_csv_path, index=False)
 
-    valid_precision = master_df.dropna(subset=['real_volume_ml', 'precision_percent'])
+    valid_precision = df.dropna(subset=['real_volume_ml', 'precision_percent'])
     if not valid_precision.empty:
         mean_precision = valid_precision['precision_percent'].mean()
         mean_error = valid_precision['error_abs_ml'].mean()
         print(f"\n✅ CONSOLIDACIÓN EXITOSA | ERROR ABSOLUTO PROMEDIO: {mean_error:.3f} mL | PRECISIÓN PROMEDIO: {mean_precision:.2f}%")
         print(f"RESULTADOS GUARDADOS EN: {master_csv_path}")
 
+def build_attribute_text(instances, idx, metadata):
+    parts = []
+
+    if hasattr(instances, "pred_species"):
+        sp = instances.pred_species[idx].item()
+        parts.append(metadata.species_classes[sp])
+
+    if hasattr(instances, "pred_quality"):
+        q = instances.pred_quality[idx].item()
+        parts.append(metadata.quality_classes[q])
+
+    if hasattr(instances, "pred_stage"):
+        st = instances.pred_stage[idx].item()
+        parts.append(metadata.stage_classes[st])
+
+    return " | ".join(parts)
+
 # --- 4. Main ---
 def main():
     input_image_dir = "testImages"
-    model_path = "output_train/model_0002999.pth" 
+    model_path = "output_train/model_0004799.pth" 
     output_base_dir = "output_predict"
     os.makedirs(output_base_dir, exist_ok=True)
 
@@ -216,6 +297,9 @@ def main():
     category_names = [cat['name'] for cat in coco_data['categories']]
     MetadataCatalog.get(dataset_name).thing_classes = category_names
     metadata = MetadataCatalog.get(dataset_name)
+    metadata.species_classes = ["moso", "other"]
+    metadata.quality_classes = ["poor", "medium", "good"]
+    metadata.stage_classes = ["non_embryogenic", "embryogenic"]
 
     # --- Volumen real desde COCO ---
     real_volume_map = {}
@@ -240,6 +324,14 @@ def main():
     # --- Predictor ---
     cfg = get_cfg()
     cfg.merge_from_file(get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
+
+    # 🔥 USAR TU ROI HEADS CUSTOM
+    cfg.MODEL.ROI_HEADS.NAME = "CallusROIHeads"
+
+    # 🔥 ATRIBUTOS (IGUAL QUE ENTRENAMIENTO)
+    cfg.MODEL.ROI_HEADS.NUM_SPECIES = 2
+    cfg.MODEL.ROI_HEADS.NUM_QUALITY = 3
+    cfg.MODEL.ROI_HEADS.NUM_STAGE = 2
     cfg.MODEL.WEIGHTS = model_path
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(category_names)
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.80 
@@ -257,7 +349,7 @@ def main():
     for key in sorted(list(sample_keys)):
         process_sample_pair(predictor, metadata, key, input_image_dir, output_base_dir, category_names)
 
-    consolidate_results(output_base_dir, real_volume_map)
+    consolidate_results(output_base_dir, real_volume_map, predicted_attributes)
 
 if __name__ == "__main__":
     main()
