@@ -38,128 +38,115 @@ def find_highest_score_instance(instances, class_id):
 
 # --- 2. Procesamiento de cada muestra (TOP + SIDE) ---
 def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output_base_dir, category_names):
-    top_name = f"{sample_key}_TOP.jpeg"
-    side_name = f"{sample_key}_SIDE.jpeg"
-    top_path = os.path.join(input_image_dir, top_name)
-    side_path = os.path.join(input_image_dir, side_name)
-
-    # Intentar con .jpg si no existe .jpeg
-    if not os.path.exists(top_path) or not os.path.exists(side_path):
-        top_name = f"{sample_key}_TOP.jpg"
-        side_name = f"{sample_key}_SIDE.jpg"
-        top_path = os.path.join(input_image_dir, top_name)
-        side_path = os.path.join(input_image_dir, side_name)
-        if not os.path.exists(top_path) or not os.path.exists(side_path):
-            print(f"[SKIP] Faltan archivos para la muestra {sample_key}.")
-            return
+    # --------------------------------------------------
+    # 0. Cargar paths
+    # --------------------------------------------------
+    for ext in [".jpeg", ".jpg"]:
+        top_path = os.path.join(input_image_dir, f"{sample_key}_TOP{ext}")
+        side_path = os.path.join(input_image_dir, f"{sample_key}_SIDE{ext}")
+        if os.path.exists(top_path) and os.path.exists(side_path):
+            break
+    else:
+        print(f"[SKIP] Faltan archivos para la muestra {sample_key}.")
+        return
 
     print(f"[PROCESS] Procesando muestra: {sample_key}")
 
     frasco_top_id = category_names.index("container_top")
     frasco_side_id = category_names.index("container_side")
-    top_classes_of_interest = [category_names.index(name) for name in ["callus", "potato"] if name in category_names]
+    top_classes_of_interest = [
+        category_names.index(n) for n in ["callus", "potato"] if n in category_names
+    ]
 
-    try:
-        cell_profile_id = category_names.index("cell_profile")
-    except ValueError:
-        cell_profile_id = None
+    cell_profile_id = category_names.index("cell_profile") if "cell_profile" in category_names else None
 
-    # --- SIDE ---
+    # --------------------------------------------------
+    # 1. SIDE → altura real
+    # --------------------------------------------------
     im_side = cv2.imread(side_path)
-    outputs_side = predictor(im_side)
-    instances_side = outputs_side["instances"].to("cpu")
+    instances_side = predictor(im_side)["instances"].to("cpu")
 
-    frasco_side_instance = find_highest_score_instance(instances_side, frasco_side_id)
-    if frasco_side_instance is None:
+    frasco_side = find_highest_score_instance(instances_side, frasco_side_id)
+    if frasco_side is None:
         print("[ERROR] Contenedor no detectado en SIDE.")
-        v_side = Visualizer(im_side[:, :, ::-1], metadata, scale=1.0, instance_mode=ColorMode.SEGMENTATION)
-        out_side = v_side.draw_instance_predictions(instances_side)
-        cv2.imwrite(os.path.join(output_base_dir, f"{sample_key}_SIDE_debug.jpg"), out_side.get_image()[:, :, ::-1])
         return
 
-    frasco_side_mask = frasco_side_instance.pred_masks[0].cpu().numpy().astype(bool)
-    y_coords_side, _ = np.where(frasco_side_mask)
-    height_pixels_frasco = y_coords_side.max() - y_coords_side.min()
-    factor_z_mm_per_pixel = FRASCO_HEIGHT_MM / height_pixels_frasco
+    frasco_mask = frasco_side.pred_masks[0].numpy().astype(bool)
+    y = np.where(frasco_mask)[0]
+    factor_z = FRASCO_HEIGHT_MM / (y.max() - y.min())
 
     if cell_profile_id is not None:
-        cell_profile_instance = find_highest_score_instance(instances_side, cell_profile_id)
-        if cell_profile_instance is None:
+        cell_prof = find_highest_score_instance(instances_side, cell_profile_id)
+        if cell_prof is None:
             print("[ERROR] cell_profile no detectada en SIDE.")
             return
-        cell_profile_mask = cell_profile_instance.pred_masks[0].cpu().numpy().astype(bool)
-        y_coords_cell, _ = np.where(cell_profile_mask)
-        height_real_mm = (y_coords_cell.max() - y_coords_cell.min()) * factor_z_mm_per_pixel
+        m = cell_prof.pred_masks[0].numpy().astype(bool)
+        y = np.where(m)[0]
+        height_real_mm = (y.max() - y.min()) * factor_z
     else:
         height_real_mm = None
 
-    # --- TOP ---
+    # --------------------------------------------------
+    # 2. TOP → área y selección de mejor célula
+    # --------------------------------------------------
     im_top = cv2.imread(top_path)
-    outputs_top = predictor(im_top)
-    instances_top = outputs_top["instances"].to("cpu")
+    instances_top = predictor(im_top)["instances"].to("cpu")
 
-    frasco_top_instance = find_highest_score_instance(instances_top, frasco_top_id)
-    if frasco_top_instance is None:
+    frasco_top = find_highest_score_instance(instances_top, frasco_top_id)
+    if frasco_top is None:
         print("[ERROR] Contenedor no detectado en TOP.")
-        v_top = Visualizer(im_top[:, :, ::-1], metadata, scale=1.0, instance_mode=ColorMode.SEGMENTATION)
-        out_top = v_top.draw_instance_predictions(instances_top)
-        cv2.imwrite(os.path.join(output_base_dir, f"{sample_key}_TOP_debug.jpg"), out_top.get_image()[:, :, ::-1])
         return
 
-    frasco_top_mask = frasco_top_instance.pred_masks[0].cpu().numpy().astype(bool)
-    y_coords_top, x_coords_top = np.where(frasco_top_mask)
-    width_pixels_frasco = x_coords_top.max() - x_coords_top.min()
-    pixels_per_mm = width_pixels_frasco / FRASCO_DIAMETER_MM
-    pixels_to_mm2 = 1 / (pixels_per_mm ** 2)
+    mask_f = frasco_top.pred_masks[0].numpy().astype(bool)
+    _, x = np.where(mask_f)
+    px_per_mm = (x.max() - x.min()) / FRASCO_DIAMETER_MM
+    px_to_mm2 = 1 / (px_per_mm ** 2)
 
-    # --- SELECCIONAR UNA SOLA CÉLULA ---
-    best_cell = None
-    best_score = -1
-    for idx in range(len(instances_top)):
-        class_id = instances_top.pred_classes[idx].item()
-        if class_id not in top_classes_of_interest:
+    best_cell, best_score = None, -1
+    for i in range(len(instances_top)):
+        cid = instances_top.pred_classes[i].item()
+        if cid not in top_classes_of_interest:
             continue
-
-        cell_mask = instances_top.pred_masks[idx].numpy().astype(bool)
-        intersection = np.logical_and(frasco_top_mask, cell_mask)
-        if np.sum(intersection) / np.sum(cell_mask) < 0.9:
+        m = instances_top.pred_masks[i].numpy().astype(bool)
+        if np.sum(m & mask_f) / np.sum(m) < 0.9:
             continue
-
-        score = instances_top.scores[idx].item()
-        if score > best_score:
-            best_score = score
-            best_cell = idx
+        s = instances_top.scores[i].item()
+        if s > best_score:
+            best_score, best_cell = s, i
 
     if best_cell is None:
-        print("[ERROR] No se encontró célula válida en TOP.")
+        print("[ERROR] No se encontró célula válida.")
         return
 
-    # --- Cálculo de volumen ---
+    # --------------------------------------------------
+    # 3. Datos finales de la mejor instancia
+    # --------------------------------------------------
+    best_class_id = instances_top.pred_classes[best_cell].item()
+    best_class_name = category_names[best_class_id]
+
     cell_mask = instances_top.pred_masks[best_cell].numpy().astype(bool)
-    area_mm2 = np.sum(cell_mask) * pixels_to_mm2
+    area_mm2 = np.sum(cell_mask) * px_to_mm2
+
     if height_real_mm is None:
-        print("[ERROR] Altura no disponible para volumen.")
+        print("[ERROR] Altura no disponible.")
         return
+
     volumen_ml = (area_mm2 * height_real_mm) / 1000
+    ys, xs = np.where(cell_mask)
+    cx, cy = int(xs.mean()), int(ys.mean())
 
-    y_c, x_c = np.where(cell_mask)
-    center_x, center_y = int(np.mean(x_c)), int(np.mean(y_c))
-
-    # --- Guardar atributos predichos para Excel ---
-    class_id = instances_top.pred_classes[best_cell].item()
-    class_name = category_names[class_id]
-
-    # Solo si la clase es callus, agregamos atributos
-    class_name = category_names[instances_top.pred_classes[best_cell].item()]
-
-    if class_name == "callus":
+    # --------------------------------------------------
+    # 4. Atributos (SOLO si es callus)
+    # --------------------------------------------------
+    if best_class_name == "callus":
         species = metadata.species_classes[instances_top.pred_species[best_cell].item()]
         quality = metadata.quality_classes[instances_top.pred_quality[best_cell].item()]
-        stage = metadata.stage_classes[instances_top.pred_stage[best_cell].item()]
+        stage   = metadata.stage_classes[instances_top.pred_stage[best_cell].item()]
     else:
-        species, quality, stage = None, None, None
-    # Guardar atributos predichos para consolidación y visualización
+        species = quality = stage = None
+
     predicted_attributes[sample_key] = {
+        "class": best_class_name,
         "species": species,
         "quality": quality,
         "stage": stage,
@@ -169,63 +156,50 @@ def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output
         "height_mm": height_real_mm
     }
 
-    volume_results = [{
+    # --------------------------------------------------
+    # 5. Guardar imágenes
+    # --------------------------------------------------
+    for view, im, inst, name in [
+        ("TOP", im_top, instances_top, f"{sample_key}_TOP_predicted.jpg"),
+        ("SIDE", im_side, instances_side, f"{sample_key}_SIDE_predicted.jpg")
+    ]:
+        v = Visualizer(im[:, :, ::-1], metadata, instance_mode=ColorMode.SEGMENTATION)
+
+        for i in range(len(inst)):
+            v.draw_binary_mask(inst.pred_masks[i].numpy(), alpha=0.4)
+
+        if view == "TOP":
+            a = predicted_attributes[sample_key]
+            text = (
+                f"Class: {a['class']}\n"
+                f"Species: {a['species']}\n"
+                f"Quality: {a['quality']}\n"
+                f"Stage: {a['stage']}\n"
+                f"Score: {a['score']:.2f}\n"
+                f"Volume: {a['volume_ml']:.2f} mL"
+            )
+            v.draw_text(text, (cx, cy), font_size=14, color="yellow", horizontal_alignment="center")
+
+        cv2.imwrite(os.path.join(output_base_dir, name), v.output.get_image()[:, :, ::-1])
+
+    # --------------------------------------------------
+    # 6. CSV
+    # --------------------------------------------------
+    df = pd.DataFrame([{
         "sample_key": sample_key,
-        "class_name": class_name,
+        "class_name": best_class_name,
         "species": species,
         "quality": quality,
         "stage": stage,
         "volume_ml": volumen_ml,
         "area_mm2": area_mm2,
         "height_mm": height_real_mm,
-        "center_x": center_x,
-        "center_y": center_y,
+        "center_x": cx,
+        "center_y": cy,
         "score": best_score
-    }]
+    }])
 
-    # --- Guardar imágenes predichas ---
-    for view, im, instances, fname in [("TOP", im_top, instances_top, f"{sample_key}_TOP_predicted.jpg"),
-                                       ("SIDE", im_side, instances_side, f"{sample_key}_SIDE_predicted.jpg")]:
-        v = Visualizer(im[:, :, ::-1], metadata, scale=1.0, instance_mode=ColorMode.SEGMENTATION)
-        instances = instances.to("cpu")
-
-        for i in range(len(instances)):
-            mask = instances.pred_masks[i].numpy()
-            class_id = instances.pred_classes[i].item()
-            class_name = metadata.thing_classes[class_id]
-            score = instances.scores[i].item()
-
-            # Dibujar máscara
-            v.draw_binary_mask(mask, alpha=0.6)
-
-            # Centro
-            ys, xs = np.where(mask)
-            if len(xs) == 0:
-                continue
-            cx, cy = int(xs.mean()), int(ys.mean())
-
-        if sample_key in predicted_attributes:
-            attr = predicted_attributes[sample_key]
-            full_text = f"{class_name} | {attr['species']} | {attr['quality']} | {attr['stage']}\nscore: {attr['score']:.2f}\nvol: {attr['volume_ml']:.2f} mL"
-        else:
-            full_text = f"{class_name}\nscore: {instances_top.scores[i].item():.2f}"
-
-        v.draw_text(
-            full_text,
-            (cx, cy),
-            font_size=10,
-            color="white",
-            horizontal_alignment="center"
-        )
-
-
-        out = v.output
-        cv2.imwrite(os.path.join(output_base_dir, fname), out.get_image()[:, :, ::-1])
-
-    # --- Guardar CSV ---
-    output_csv_path = os.path.join(output_base_dir, f"{sample_key}_volumes.csv")
-    df = pd.DataFrame(volume_results)
-    df.to_csv(output_csv_path, index=False)
+    df.to_csv(os.path.join(output_base_dir, f"{sample_key}_volumes.csv"), index=False)
     print(f"[SAVE] CSV guardado para {sample_key}")
 
 # --- 3. Consolidación de resultados ---
