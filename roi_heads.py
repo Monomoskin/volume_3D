@@ -21,41 +21,70 @@ STAGE = ["non_embryogenic", "embryogenic"]
 class CallusROIHeads(StandardROIHeads):
     def __init__(self, cfg, input_shape):
         super().__init__(cfg, input_shape)
+
         dim = self.box_head.output_shape.channels
         self.species_head = AttributeHead(dim, len(SPECIES))
         self.quality_head = AttributeHead(dim, len(QUALITY))
         self.stage_head   = AttributeHead(dim, len(STAGE))
 
     def _shared_roi_features(self, features, instances):
-        box_features = self.box_pooler([features[f] for f in self.in_features],
-                                       [x.proposal_boxes for x in instances])
+        box_features = self.box_pooler(
+            [features[f] for f in self.in_features],
+            [x.proposal_boxes for x in instances]
+        )
         box_features = self.box_head(box_features)
         return box_features
 
     def forward(self, images, features, proposals, targets=None):
+        # -------------------------------------------------
+        # 1. Forward normal de Detectron2
+        # -------------------------------------------------
         instances, losses = super().forward(images, features, proposals, targets)
 
+        if len(instances) == 0:
+            return instances, losses
+
+        # 👉 features compartidas para TRAIN e INFERENCE
+        box_features = self._shared_roi_features(features, instances)
+
+        # -------------------------------------------------
+        # 2. TRAINING → pérdidas de atributos
+        # -------------------------------------------------
         if self.training and targets is not None:
-            box_features = self._shared_roi_features(features, proposals)
+            callus_indices = [
+                i for i, t in enumerate(targets) if hasattr(t, "species")
+            ]
 
-            # Solo instancias de 'callus' que tienen atributos
-            callus_targets = [t for t in targets if hasattr(t, "species")]
+            if len(callus_indices) > 0:
+                feats = box_features[callus_indices]
 
-            if callus_targets:
-                callus_indices = [i for i, t in enumerate(targets) if hasattr(t, "species")]
-                callus_features = box_features[callus_indices]
-
-                species_targets = torch.cat([t.species for t in callus_targets])
-                quality_targets = torch.cat([t.quality for t in callus_targets])
-                stage_targets   = torch.cat([t.stage   for t in callus_targets])
+                species_targets = torch.cat([targets[i].species for i in callus_indices])
+                quality_targets = torch.cat([targets[i].quality for i in callus_indices])
+                stage_targets   = torch.cat([targets[i].stage   for i in callus_indices])
 
                 losses.update({
-                    "loss_species": F.cross_entropy(self.species_head(callus_features), species_targets),
-                    "loss_quality": F.cross_entropy(self.quality_head(callus_features), quality_targets),
-                    "loss_stage":   F.cross_entropy(self.stage_head(callus_features),   stage_targets),
+                    "loss_species": F.cross_entropy(
+                        self.species_head(feats), species_targets
+                    ),
+                    "loss_quality": F.cross_entropy(
+                        self.quality_head(feats), quality_targets
+                    ),
+                    "loss_stage": F.cross_entropy(
+                        self.stage_head(feats), stage_targets
+                    ),
                 })
 
+        # -------------------------------------------------
+        # 3. INFERENCE → guardar pred_* en Instances
+        # -------------------------------------------------
+        if not self.training:
+            with torch.no_grad():
+                instances.pred_species = self.species_head(box_features).argmax(dim=1)
+                instances.pred_quality = self.quality_head(box_features).argmax(dim=1)
+                instances.pred_stage   = self.stage_head(box_features).argmax(dim=1)
+
         return instances, losses
+
 class AttributeHead(nn.Module):
     def __init__(self, in_dim, num_classes):
         super().__init__()
