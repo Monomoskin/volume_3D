@@ -21,13 +21,13 @@ STAGE = ["non_embryogenic", "embryogenic"]
 class CallusROIHeads(StandardROIHeads):
     def __init__(self, cfg, input_shape):
         super().__init__(cfg, input_shape)
-
         dim = self.box_head.output_shape.channels
         self.species_head = AttributeHead(dim, len(SPECIES))
         self.quality_head = AttributeHead(dim, len(QUALITY))
         self.stage_head   = AttributeHead(dim, len(STAGE))
 
     def _shared_roi_features(self, features, instances):
+        # Extrae features para cada ROI usando el box_pooler y box_head
         box_features = self.box_pooler(
             [features[f] for f in self.in_features],
             [x.proposal_boxes for x in instances]
@@ -36,52 +36,56 @@ class CallusROIHeads(StandardROIHeads):
         return box_features
 
     def forward(self, images, features, proposals, targets=None):
-        # -------------------------------------------------
-        # 1. Forward normal de Detectron2
-        # -------------------------------------------------
+        # Llamar a la implementación base
         instances, losses = super().forward(images, features, proposals, targets)
 
-        if len(instances) == 0:
-            return instances, losses
+        # Obtener features de los ROIs
+        box_features = self._shared_roi_features(features, proposals)
 
-        # 👉 features compartidas para TRAIN e INFERENCE
-        box_features = self._shared_roi_features(features, instances)
+        # Calcular logits de atributos
+        species_logits = self.species_head(box_features)
+        quality_logits = self.quality_head(box_features)
+        stage_logits   = self.stage_head(box_features)
 
-        # -------------------------------------------------
-        # 2. TRAINING → pérdidas de atributos
-        # -------------------------------------------------
+        # Distribuir logits por imagen
+        start_idx = 0
+        for i, inst in enumerate(instances):
+            num_inst = len(inst)
+            inst.species_logits = species_logits[start_idx:start_idx + num_inst]
+            inst.quality_logits = quality_logits[start_idx:start_idx + num_inst]
+            inst.stage_logits   = stage_logits[start_idx:start_idx + num_inst]
+
+            # Solo calcular clase predicha en modo inferencia
+            if not self.training:
+                inst.species = inst.species_logits.argmax(dim=-1)
+                inst.quality = inst.quality_logits.argmax(dim=-1)
+                inst.stage   = inst.stage_logits.argmax(dim=-1)
+
+            start_idx += num_inst
+
+        # Durante entrenamiento, calcular losses si hay targets
         if self.training and targets is not None:
-            callus_indices = [
-                i for i, t in enumerate(targets) if hasattr(t, "species")
-            ]
-
-            if len(callus_indices) > 0:
-                feats = box_features[callus_indices]
-
-                species_targets = torch.cat([targets[i].species for i in callus_indices])
-                quality_targets = torch.cat([targets[i].quality for i in callus_indices])
-                stage_targets   = torch.cat([targets[i].stage   for i in callus_indices])
-
-                losses.update({
-                    "loss_species": F.cross_entropy(
-                        self.species_head(feats), species_targets
-                    ),
-                    "loss_quality": F.cross_entropy(
-                        self.quality_head(feats), quality_targets
-                    ),
-                    "loss_stage": F.cross_entropy(
-                        self.stage_head(feats), stage_targets
-                    ),
-                })
-
-        # -------------------------------------------------
-        # 3. INFERENCE → guardar pred_* en Instances
-        # -------------------------------------------------
-        if not self.training:
-            with torch.no_grad():
-                instances.pred_species = self.species_head(box_features).argmax(dim=1)
-                instances.pred_quality = self.quality_head(box_features).argmax(dim=1)
-                instances.pred_stage   = self.stage_head(box_features).argmax(dim=1)
+            callus_targets = [t for t in targets if hasattr(t, "species")]
+            if callus_targets:
+                start_idx = 0
+                for i, t in enumerate(targets):
+                    num_inst = len(t)
+                    if hasattr(t, "species"):
+                        losses.update({
+                            "loss_species": F.cross_entropy(
+                                species_logits[start_idx:start_idx + num_inst],
+                                t.species
+                            ),
+                            "loss_quality": F.cross_entropy(
+                                quality_logits[start_idx:start_idx + num_inst],
+                                t.quality
+                            ),
+                            "loss_stage": F.cross_entropy(
+                                stage_logits[start_idx:start_idx + num_inst],
+                                t.stage
+                            ),
+                        })
+                    start_idx += num_inst
 
         return instances, losses
 

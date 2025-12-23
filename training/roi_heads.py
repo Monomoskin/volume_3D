@@ -27,35 +27,68 @@ class CallusROIHeads(StandardROIHeads):
         self.stage_head   = AttributeHead(dim, len(STAGE))
 
     def _shared_roi_features(self, features, instances):
-        box_features = self.box_pooler([features[f] for f in self.in_features],
-                                       [x.proposal_boxes for x in instances])
+        # Extrae features para cada ROI usando el box_pooler y box_head
+        box_features = self.box_pooler(
+            [features[f] for f in self.in_features],
+            [x.proposal_boxes for x in instances]
+        )
         box_features = self.box_head(box_features)
         return box_features
 
     def forward(self, images, features, proposals, targets=None):
+        # Llamar a la implementación base
         instances, losses = super().forward(images, features, proposals, targets)
 
+        # Obtener features de los ROIs
+        box_features = self._shared_roi_features(features, proposals)
+
+        # Calcular logits de atributos
+        species_logits = self.species_head(box_features)
+        quality_logits = self.quality_head(box_features)
+        stage_logits   = self.stage_head(box_features)
+
+        # Distribuir logits por imagen
+        start_idx = 0
+        for i, inst in enumerate(instances):
+            num_inst = len(inst)
+            inst.species_logits = species_logits[start_idx:start_idx + num_inst]
+            inst.quality_logits = quality_logits[start_idx:start_idx + num_inst]
+            inst.stage_logits   = stage_logits[start_idx:start_idx + num_inst]
+
+            # Solo calcular clase predicha en modo inferencia
+            if not self.training:
+                inst.species = inst.species_logits.argmax(dim=-1)
+                inst.quality = inst.quality_logits.argmax(dim=-1)
+                inst.stage   = inst.stage_logits.argmax(dim=-1)
+
+            start_idx += num_inst
+
+        # Durante entrenamiento, calcular losses si hay targets
         if self.training and targets is not None:
-            box_features = self._shared_roi_features(features, proposals)
-
-            # Solo instancias de 'callus' que tienen atributos
             callus_targets = [t for t in targets if hasattr(t, "species")]
-
             if callus_targets:
-                callus_indices = [i for i, t in enumerate(targets) if hasattr(t, "species")]
-                callus_features = box_features[callus_indices]
-
-                species_targets = torch.cat([t.species for t in callus_targets])
-                quality_targets = torch.cat([t.quality for t in callus_targets])
-                stage_targets   = torch.cat([t.stage   for t in callus_targets])
-
-                losses.update({
-                    "loss_species": F.cross_entropy(self.species_head(callus_features), species_targets),
-                    "loss_quality": F.cross_entropy(self.quality_head(callus_features), quality_targets),
-                    "loss_stage":   F.cross_entropy(self.stage_head(callus_features),   stage_targets),
-                })
+                start_idx = 0
+                for i, t in enumerate(targets):
+                    num_inst = len(t)
+                    if hasattr(t, "species"):
+                        losses.update({
+                            "loss_species": F.cross_entropy(
+                                species_logits[start_idx:start_idx + num_inst],
+                                t.species
+                            ),
+                            "loss_quality": F.cross_entropy(
+                                quality_logits[start_idx:start_idx + num_inst],
+                                t.quality
+                            ),
+                            "loss_stage": F.cross_entropy(
+                                stage_logits[start_idx:start_idx + num_inst],
+                                t.stage
+                            ),
+                        })
+                    start_idx += num_inst
 
         return instances, losses
+
 class AttributeHead(nn.Module):
     def __init__(self, in_dim, num_classes):
         super().__init__()

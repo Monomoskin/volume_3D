@@ -129,12 +129,11 @@ def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output
             volume_ml = (area_mm2 * height_real_mm) / 1000
         else:
             volume_ml = None
-
         # Atributos solo callus
-        if best_class_name == "callus" and hasattr(inst_top, "pred_species"):
-            species = metadata.species_classes[inst_top.pred_species[i].item()]
-            quality = metadata.quality_classes[inst_top.pred_quality[i].item()]
-            stage   = metadata.stage_classes[inst_top.pred_stage[i].item()]
+        if best_class_name == "callus" and hasattr(inst_top, "species"):
+            species = metadata.species_classes[inst_top.species[i].item()]
+            quality = metadata.quality_classes[inst_top.quality[i].item()]
+            stage   = metadata.stage_classes[inst_top.stage[i].item()]
         else:
             species = quality = stage = None
 
