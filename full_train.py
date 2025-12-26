@@ -202,7 +202,7 @@ def train_model(metadata):
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(metadata.thing_classes)
 
     cfg.SOLVER.BASE_LR = 0.0001
-    cfg.SOLVER.MAX_ITER = 5000
+    cfg.SOLVER.MAX_ITER = 8000
     cfg.SOLVER.OPTIMIZER = "AdamW"
     cfg.SOLVER.STEPS = []
     cfg.SOLVER.IMS_PER_BATCH = 2

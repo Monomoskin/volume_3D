@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 import os
+import numpy as np
+import os
 import json
 import pandas as pd
 import torch
@@ -36,7 +38,9 @@ def find_highest_score_instance(instances, class_id):
     
     return best_instance
 
-def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output_base_dir, category_names):
+def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output_base_dir, category_names, predicted_attributes):
+
+
     # --------------------------------------------------
     # 0. Buscar archivos (TOP obligatorio, SIDE opcional)
     # --------------------------------------------------
@@ -64,7 +68,7 @@ def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output
     cell_profile_id = category_names.index("cell_profile") if "cell_profile" in category_names else None
 
     # --------------------------------------------------
-    # 1. SIDE → altura real (si existe)
+    # 1. SIDE → altura real y segmentación
     # --------------------------------------------------
     height_real_mm = None
     if has_side:
@@ -83,6 +87,37 @@ def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output
                     m_cp = cp.pred_masks[0].numpy().astype(bool)
                     ys = np.where(m_cp)[0]
                     height_real_mm = (ys.max() - ys.min()) * factor_z
+
+        # Crear imagen SIDE segmentada con anotaciones
+        v_side = Visualizer(im_side[:, :, ::-1], metadata, instance_mode=ColorMode.SEGMENTATION)
+        for i in range(len(inst_side)):
+            mask = inst_side.pred_masks[i].numpy()
+            if mask.sum() == 0:
+                continue
+            v_side.draw_binary_mask(mask, alpha=0.35)
+
+        for i in range(len(inst_side)):
+            cid = inst_side.pred_classes[i].item()
+            class_name = category_names[cid]
+            if class_name not in ["cell_profile", "container_side"]:
+                continue
+            mask = inst_side.pred_masks[i].numpy()
+            ys_mask, xs_mask = np.where(mask)
+            if len(xs_mask) == 0 or len(ys_mask) == 0:
+                continue
+            cx, cy = int(xs_mask.mean()), int(ys_mask.mean())
+
+            if class_name == "cell_profile":
+                if height_real_mm is not None:
+                    text = f"{class_name}\nH: {height_real_mm:.1f} mm"
+                else:
+                    text = class_name
+            else:
+                text = class_name
+            v_side.draw_text(text, (cx, cy - 10), font_size=16, color="yellow", horizontal_alignment="center")
+
+        cv2.imwrite(os.path.join(output_base_dir, f"{sample_key}_SIDE_predicted.jpg"),
+                    v_side.output.get_image()[:, :, ::-1])
 
     # --------------------------------------------------
     # 2. TOP → detección y selección de células
@@ -104,7 +139,6 @@ def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output
     # 3. Recorrer todas las células TOP
     # --------------------------------------------------
     volume_calculable = has_side and (len([i for i in range(len(inst_top)) if inst_top.pred_classes[i].item() in top_classes_of_interest]) == 1)
-    volume_ml = None
     rows = []
 
     for i in range(len(inst_top)):
@@ -125,10 +159,8 @@ def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output
         cx, cy = int(xs.mean()), int(ys.mean())
 
         # Calcular volumen solo si hay SIDE y solo 1 célula
-        if volume_calculable:
-            volume_ml = (area_mm2 * height_real_mm) / 1000
-        else:
-            volume_ml = None
+        volume_ml = (area_mm2 * height_real_mm) / 1000 if volume_calculable else None
+
         # Atributos solo callus
         if best_class_name == "callus" and hasattr(inst_top, "species"):
             species = metadata.species_classes[inst_top.species[i].item()]
@@ -140,14 +172,14 @@ def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output
         # Guardar en predicted_attributes con key por célula
         cell_key = f"{sample_key}_cell{i+1}"
         predicted_attributes[cell_key] = {
-            "class": best_class_name,
-            "species": species,
-            "quality": quality,
-            "stage": stage,
-            "score": round(score, 3),
-            "volume_ml": volume_ml,
-            "area_mm2": area_mm2,
-            "height_mm": height_real_mm
+        "class": best_class_name,
+        "species": species,
+        "quality": quality,
+        "stage": stage,
+        "score": round(score, 3),
+        "volume_ml": volume_ml,
+        "area_mm2": area_mm2,
+        "height_mm": height_real_mm
         }
 
         rows.append({
@@ -165,7 +197,7 @@ def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output
         })
 
     # --------------------------------------------------
-    # 4. Guardar imagen con texto para cada célula
+    # 4. Guardar imagen con texto para cada célula TOP
     # --------------------------------------------------
     v = Visualizer(im_top[:, :, ::-1], metadata, instance_mode=ColorMode.SEGMENTATION)
     for i in range(len(inst_top)):
@@ -203,11 +235,13 @@ def process_sample_pair(predictor, metadata, sample_key, input_image_dir, output
 def consolidate_results(output_base_dir, real_volume_map, predicted_attributes):
     all_rows = []
 
-    for sample_key, attr in predicted_attributes.items():
+    for cell_key, attr in predicted_attributes.items():
         volume_ml = attr["volume_ml"] if attr["volume_ml"] is not None else np.nan
-        real_volume = real_volume_map.get(sample_key, np.nan)
+        # Mapear el volumen real por sample_key (sin _cellX)
+        sample_key_only = cell_key.rsplit("_cell",1)[0]
+        real_volume = real_volume_map.get(sample_key_only, np.nan)
 
-        # Calcular error absoluto de forma segura
+        # Calcular error y precisión
         if not np.isnan(volume_ml) and not np.isnan(real_volume):
             error_abs_ml = abs(volume_ml - real_volume)
             precision_percent = (1 - error_abs_ml / real_volume) * 100
@@ -215,8 +249,8 @@ def consolidate_results(output_base_dir, real_volume_map, predicted_attributes):
             error_abs_ml = np.nan
             precision_percent = np.nan
 
-        row = {
-            "sample_key": sample_key,
+        all_rows.append({
+            "sample_key": cell_key,
             "species": attr["species"],
             "quality": attr["quality"],
             "stage": attr["stage"],
@@ -227,15 +261,12 @@ def consolidate_results(output_base_dir, real_volume_map, predicted_attributes):
             "real_volume_ml": real_volume,
             "error_abs_ml": error_abs_ml,
             "precision_percent": precision_percent
-        }
-
-        all_rows.append(row)
+        })
 
     df = pd.DataFrame(all_rows)
     master_csv_path = os.path.join(output_base_dir, 'all_volumes_summary.xlsx')
     df.to_excel(master_csv_path, index=False)
 
-    # Estadísticas solo con datos válidos
     valid_precision = df.dropna(subset=['error_abs_ml', 'precision_percent'])
     if not valid_precision.empty:
         mean_precision = valid_precision['precision_percent'].mean()
@@ -264,8 +295,8 @@ def build_attribute_text(instances, idx, metadata):
 
 # --- 4. Main ---
 def main():
-    input_image_dir = "testImages_copy"
-    model_path = "output_train/model_final.pth" 
+    input_image_dir = "testImages"
+    model_path = "output_train_attr/model_final.pth" 
     output_base_dir = "output_predict"
     os.makedirs(output_base_dir, exist_ok=True)
 
@@ -333,7 +364,9 @@ def main():
             sample_keys.add(key)
 
     for key in sorted(list(sample_keys)):
-        process_sample_pair(predictor, metadata, key, input_image_dir, output_base_dir, category_names)
+        process_sample_pair(
+        predictor, metadata, key, input_image_dir, output_base_dir, category_names, predicted_attributes
+        )
 
     consolidate_results(output_base_dir, real_volume_map, predicted_attributes)
 
