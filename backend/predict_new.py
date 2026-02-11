@@ -194,7 +194,7 @@ def process_pair_for_backend(
         # Decidir posición del texto de altura
         if cell_profile_center is not None:
             # Centrado arriba del centro de cell_profile
-            text_pos = (cell_profile_center[0], cell_profile_center[1] - 60)  # -60 píxeles arriba para que quede visible
+            text_pos = (cell_profile_center[0], cell_profile_center[1] - 140)  # -60 píxeles arriba para que quede visible
             alignment = "center"
         else:
             # Fallback: posición fija arriba-izquierda

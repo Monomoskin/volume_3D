@@ -47,30 +47,29 @@ const NewMeasurement = () => {
   // -------------------------------------------------------------------
   // LÓGICA DE CARGA DE CÉLULAS EXISTENTES
   // -------------------------------------------------------------------
+  const fetchAvailableCells = async () => {
+    try {
+      setLoadingCells(true);
+      setCellsError(null);
+
+      const summaryData = await getEstimationsSummary();
+
+      const cellsList = summaryData.map((item) => ({
+        code: item["Cell Name"],
+        name: item["Cell Name"],
+      }));
+
+      setAvailableCells(cellsList);
+    } catch (error) {
+      console.error("Error fetching available cells:", error);
+      setCellsError(
+        "Failed to load cell list. Check network or server status.",
+      );
+    } finally {
+      setLoadingCells(false);
+    }
+  };
   useEffect(() => {
-    const fetchAvailableCells = async () => {
-      try {
-        setLoadingCells(true);
-        setCellsError(null);
-
-        const summaryData = await getEstimationsSummary();
-
-        const cellsList = summaryData.map((item) => ({
-          code: item["Cell Name"],
-          name: item["Cell Name"],
-        }));
-
-        setAvailableCells(cellsList);
-      } catch (error) {
-        console.error("Error fetching available cells:", error);
-        setCellsError(
-          "Failed to load cell list. Check network or server status.",
-        );
-      } finally {
-        setLoadingCells(false);
-      }
-    };
-
     fetchAvailableCells();
   }, []);
 
@@ -118,9 +117,7 @@ const NewMeasurement = () => {
   const canAnalyze =
     !loadingCells &&
     ((selectedCell && selectedCell !== "new") ||
-      (selectedCell === "new" &&
-        form.getFieldValue("cellName") &&
-        form.getFieldValue("idCode"))) &&
+      (selectedCell === "new" && form.getFieldValue("cellName"))) &&
     topFile.length > 0 &&
     sideFile.length > 0;
 
@@ -238,6 +235,7 @@ const NewMeasurement = () => {
     setTopFile([]);
     setSideFile([]);
     setResults(null);
+    fetchAvailableCells();
     message.info("Form has been reset. You can analyze a new measurement.");
   };
   return (
@@ -285,21 +283,6 @@ const NewMeasurement = () => {
                   >
                     <Input
                       placeholder="e.g., Callus_A_Type_1"
-                      disabled={selectedCell && selectedCell !== "new"}
-                    />
-                  </Form.Item>
-                  <Form.Item
-                    label="Identification Code"
-                    name="idCode"
-                    rules={[
-                      {
-                        required: true,
-                        message: "The identification code is required.",
-                      },
-                    ]}
-                  >
-                    <Input
-                      placeholder="e.g., C-12345"
                       disabled={selectedCell && selectedCell !== "new"}
                     />
                   </Form.Item>
