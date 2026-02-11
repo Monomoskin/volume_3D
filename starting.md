@@ -4,7 +4,7 @@ python3 -m venv venv
 
 # activate it
 
-source venv/bin/activate
+source newenv/bin/activate
 
 # install prerequisites.txt
 

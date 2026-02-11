@@ -1,19 +1,18 @@
-import React, { useState } from "react";
+import React from "react";
 import {
   Modal,
   Card,
   Typography,
   Button,
-  Spin,
   Tooltip,
   Space,
   Image,
+  Divider,
 } from "antd";
 import {
   CloseOutlined,
   FullscreenOutlined,
   ZoomInOutlined,
-  LoadingOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 
@@ -22,84 +21,76 @@ const { Title, Paragraph } = Typography;
 const EMPTY_DATA = {
   "Measurement ID": "N/A",
   "Upload Date": dayjs().toISOString(),
-  predicted_image_top_url:
-    "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==",
-  predicted_image_side_url:
-    "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==",
+  predicted_image_top_clean_url: null,
+  predicted_image_top_with_text_url: null,
+  predicted_image_side_clean_url: null,
+  predicted_image_side_with_text_url: null,
+  uploaded_image_top_url: null,
+  uploaded_image_side_url: null,
 };
 
 const ImageViewerModal = ({ isVisible, onClose, data = EMPTY_DATA }) => {
-  const [isLoading] = useState(false);
-  console.log(data);
   const measurementId = data["Measurement ID"] || EMPTY_DATA["Measurement ID"];
   const measurementDate = data["Upload Date"] || EMPTY_DATA["Upload Date"];
 
-  const finalTopSrc =
-    data["predicted_image_top_url"] || EMPTY_DATA["predicted_image_top_url"];
-  const finalSideSrc =
-    data["predicted_image_side_url"] || EMPTY_DATA["predicted_image_side_url"];
-  const initTopSrc =
-    data["uploaded_image_top_url"] || EMPTY_DATA["uploaded_image_top_url"];
-  const initSideSrc =
-    data["uploaded_image_side_url"] || EMPTY_DATA["uploaded_image_side_url"];
+  // Predicted images (prefer "with text" versions)
+  const topWithText = data.predicted_image_top_with_text_url;
+  const topClean = data.predicted_image_top_clean_url;
+  const sideWithText = data.predicted_image_side_with_text_url;
+  const sideClean = data.predicted_image_side_clean_url;
+
+  // Original uploaded images
+  const topOriginal = data.uploaded_image_top_url;
+  const sideOriginal = data.uploaded_image_side_url;
 
   const footer = (
-    <Button
-      key="close"
-      onClick={onClose}
-      type="primary"
-      style={{ backgroundColor: "#1193d4" }}
-    >
+    <Button key="close" onClick={onClose} type="primary">
       Close Viewer
     </Button>
   );
 
   const ImageCard = ({ title, src, alt }) => (
-    <div className="relative flex flex-col items-center">
-      <Paragraph
-        strong
-        className="mb-2 text-base text-gray-700 dark:text-gray-300"
-      >
+    <div className="relative flex flex-col items-center h-52">
+      <Paragraph strong className="mb-2 text-gray-500 dark:text-gray-400">
         {title}
       </Paragraph>
       <Card
-        className="w-full aspect-square overflow-hidden shadow-lg border-2 border-primary/20 transition-all hover:border-primary"
-        bodyStyle={{ padding: 0 }}
+        className="w-full h-48 overflow-hidden shadow-md border border-gray-200 dark:border-gray-700 hover:border-primary transition-all flex items-center justify-center"
+        bodyStyle={{
+          padding: 0,
+          height: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
         hoverable
       >
-        {isLoading ? (
-          <div className="flex h-full items-center justify-center p-8">
-            <Spin
-              indicator={
-                <LoadingOutlined
-                  style={{ fontSize: 36, color: "#1193d4" }}
-                  spin
-                />
-              }
-            />
-          </div>
-        ) : (
+        {src ? (
           <Image
             alt={alt}
             src={src}
-            className="h-full w-full object-cover transition-transform duration-300 transform"
+            className="max-w-full max-h-full object-contain" // ← clave: object-contain + max-w/max-h
             preview={{
               mask: (
                 <Space
-                  size="large"
-                  className="rounded-full bg-white/20 p-3 text-white backdrop-blur-sm"
+                  size="middle"
+                  className="rounded-full bg-white/30 p-3 text-white backdrop-blur-sm"
                 >
                   <Tooltip title="Zoom In">
-                    <ZoomInOutlined className="text-3xl" />
+                    <ZoomInOutlined className="text-2xl" />
                   </Tooltip>
                   <Tooltip title="Fullscreen">
-                    <FullscreenOutlined className="text-3xl" />
+                    <FullscreenOutlined className="text-2xl" />
                   </Tooltip>
                 </Space>
               ),
               visible: !!src,
             }}
           />
+        ) : (
+          <div className="flex items-center justify-center text-gray-400 bg-gray-50 dark:bg-gray-800 w-full h-full">
+            Image not available
+          </div>
         )}
       </Card>
     </div>
@@ -111,50 +102,80 @@ const ImageViewerModal = ({ isVisible, onClose, data = EMPTY_DATA }) => {
       onCancel={onClose}
       title={null}
       footer={footer}
-      width={850}
+      width={1000} // Balanced width for smaller cards
       centered
-      closeIcon={<CloseOutlined />}
+      // closeIcon={<CloseOutlined />}
+      footer={false}
       maskStyle={{
-        backgroundColor: "rgba(0, 0, 0, 0.3)",
-        backdropFilter: "blur(3px)",
+        backgroundColor: "rgba(0, 0, 0, 0.5)",
+        backdropFilter: "blur(6px)",
       }}
     >
-      <header className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-4 mb-6 -mt-2">
+      <header className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-4 mb-6">
         <div>
           <Title level={4} className="mb-0 text-gray-900 dark:text-white">
-            Images for Cell:{" "}
-            <span className="font-bold text-primary">{measurementId}</span>
+            Analysis Images for Cell:{" "}
+            <span className="font-bold text-blue-600">{measurementId}</span>
           </Title>
           <Paragraph className="text-sm text-gray-500 dark:text-gray-400 mb-0">
-            Measurement Date: {dayjs(measurementDate).format("YYYY-MM-DD")}
+            Measurement Date:{" "}
+            {dayjs(measurementDate).format("YYYY-MM-DD HH:mm:ss")}
           </Paragraph>
         </div>
       </header>
 
       <main>
         <Image.PreviewGroup>
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          {/* Predicted Images Section */}
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-4 lg:grid-cols-4 mb-8">
             <ImageCard
-              title="TOP VIEW"
-              src={finalTopSrc}
-              alt={`Top view of measurement ${measurementId}`}
+              title="TOP View (With Text)"
+              src={topWithText}
+              alt={`TOP with text - ${measurementId}`}
+              label="With Text"
             />
+
             <ImageCard
-              title="INITIAL TOP VIEW"
-              src={initTopSrc}
-              alt={`Side view of measurement ${measurementId}`}
+              title="TOP View (Clean)"
+              src={topClean}
+              alt={`TOP clean - ${measurementId}`}
+              label="Clean"
             />
+
             <ImageCard
-              title="SIDE VIEW"
-              src={finalSideSrc}
-              alt={`Side view of measurement ${measurementId}`}
+              title="SIDE View (With Text)"
+              src={sideWithText}
+              alt={`SIDE with text - ${measurementId}`}
+              label="With Text"
             />
+
             <ImageCard
-              title="INITIAL SIDE VIEW"
-              src={initSideSrc}
-              alt={`Side view of measurement ${measurementId}`}
+              title="SIDE View (Clean)"
+              src={sideClean}
+              alt={`SIDE clean - ${measurementId}`}
+              label="Clean"
             />
           </div>
+
+          {/* Original Uploaded Images (optional section) */}
+          {(topOriginal || sideOriginal) && (
+            <>
+              <Divider orientation="left">Original Uploaded Images</Divider>
+              <div className="grid grid-cols-1 w-96 gap-6 sm:grid-cols-2">
+                <ImageCard
+                  title="TOP Original"
+                  src={topOriginal}
+                  alt={`Original TOP - ${measurementId}`}
+                />
+
+                <ImageCard
+                  title="SIDE Original"
+                  src={sideOriginal}
+                  alt={`Original SIDE - ${measurementId}`}
+                />
+              </div>
+            </>
+          )}
         </Image.PreviewGroup>
       </main>
     </Modal>

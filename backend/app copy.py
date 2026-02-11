@@ -5,9 +5,18 @@ import os
 from datetime import datetime
 import os.path
 import re # Necesario para la función get_image_urls_from_path
-import json
-from predict_new import process_pair_for_backend
-import uuid  
+
+# Importa la función de predicción.
+try:
+    from predict_new import predict_volume_and_save_images 
+except ImportError:
+    print("ERROR: No se pudo importar 'predict.py'. Usando función mock de seguridad.")
+    def predict_volume_and_save_images(uploaded_top_path, uploaded_side_path, output_dir, cell_name):
+        # Devuelve un volumen mock y rutas mock (predichas)
+        predicted_top_path = os.path.join(output_dir, f"{cell_name}_TOP_predicted.jpg")
+        predicted_side_path = os.path.join(output_dir, f"{cell_name}_SIDE_predicted.jpg")
+        return 0.0, predicted_top_path, predicted_side_path
+
 
 app = Flask(__name__)
 # Configuración CORS: permite la comunicación con el frontend de React
@@ -169,7 +178,7 @@ def list_latest_estimations():
 
 @app.route('/api/estimations/<string:cell_name>', methods=['GET'])
 def get_cell_history(cell_name):
-    """Obtiene el historial de estimaciones para una célula específica, con URLs reales de todas las imágenes."""
+    """Obtiene el historial de estimaciones para una célula específica."""
     df = load_data_log()
     if df.empty:
         return jsonify([]), 200
@@ -182,67 +191,20 @@ def get_cell_history(cell_name):
     cell_data['Upload Date'] = pd.to_datetime(cell_data['Upload Date'])
     cell_data = cell_data.sort_values(by='Upload Date', ascending=True)
     
-    results = []
+    df_output = cell_data[['Cell Name', 'Measurement ID', 'Upload Date', 'Estimated Volume (mL)']].copy()
     
-    for _, row in cell_data.iterrows():
-        measurement_id = row['Measurement ID']
-        date_str = str(row['Upload Date']).split(' ')[0]
-        base_path = os.path.join(date_str, cell_name)
-        
-        # Ruta del JSON de detalle (donde están las imágenes reales)
-        json_path = os.path.join(PREDICTED_FOLDER, date_str, cell_name, f"{measurement_id}_prediction.json")
-        
-        # URLs base
-        base_pred_url = f"{IMAGE_API_ROUTE}/{base_path}"
-        base_upload_url = f"{UPLOAD_API_ROUTE}/{base_path}"
-        
-        # URLs originales (siempre existen, basadas en nombres fijos)
-        uploaded_top_url = f"{base_upload_url}/{cell_name}_TOP_uploaded.jpg"
-        uploaded_side_url = f"{base_upload_url}/{cell_name}_SIDE_uploaded.jpg"
-        
-        # URLs predichas (por defecto null, se llenan si hay JSON)
-        pred_top_clean = pred_top_text = pred_side_clean = pred_side_text = None
-        
-        # Intentar leer el JSON de detalle
-        if os.path.exists(json_path):
-            try:
-                with open(json_path, 'r', encoding='utf-8') as f:
-                    pred_data = json.load(f)
-                
-                images = pred_data.get("images", {})
-                
-                # Construir URLs reales usando los nombres guardados en el JSON
-                if 'top_clean' in images:
-                    pred_top_clean = f"{base_pred_url}/{os.path.basename(images['top_clean'])}"
-                if 'top_with_text' in images:
-                    pred_top_text = f"{base_pred_url}/{os.path.basename(images['top_with_text'])}"
-                if 'side_clean' in images:
-                    pred_side_clean = f"{base_pred_url}/{os.path.basename(images['side_clean'])}"
-                if 'side_with_text' in images:
-                    pred_side_text = f"{base_pred_url}/{os.path.basename(images['side_with_text'])}"
-            except Exception as e:
-                print(f"Error leyendo JSON para {measurement_id}: {e}")
-                # No rompemos el endpoint, solo dejamos las URLs predichas en null
-        
-        # Construir el registro completo
-        record = {
-            'Cell Name': row['Cell Name'],
-            'Measurement ID': measurement_id,
-            'Upload Date': row['Upload Date'].strftime("%Y-%m-%d %H:%M:%S"),
-            'Estimated Volume (mL)': row['Estimated Volume (mL)'],
-            # URLs predichas (ahora reales)
-            'predicted_image_top_clean_url': pred_top_clean,
-            'predicted_image_top_with_text_url': pred_top_text,
-            'predicted_image_side_clean_url': pred_side_clean,
-            'predicted_image_side_with_text_url': pred_side_text,
-            # URLs originales
-            'uploaded_image_top_url': uploaded_top_url,
-            'uploaded_image_side_url': uploaded_side_url,
-        }
-        
-        results.append(record)
+    # Capturar las 4 URLs
+    df_output[['predicted_image_top_url', 'predicted_image_side_url', 
+               'uploaded_image_top_url', 'uploaded_image_side_url']] = cell_data.apply(
+        get_image_urls_from_path, 
+        axis=1, 
+        result_type='expand'
+    )
+
+    results = df_output.to_dict(orient='records')
 
     return jsonify(results), 200
+
 
 # ==============================================================================
 # 4. ENDPOINTS PARA SERVIR IMÁGENES
@@ -263,157 +225,82 @@ def serve_uploaded_image(filename):
 # 5. ENDPOINT PRINCIPAL DE PROCESAMIENTO
 # ==============================================================================
 
-
 @app.route('/api/analyze', methods=['POST'])
 def analyze_cell():
     """Endpoint principal para recibir imágenes, procesar y registrar datos."""
     
-    # Validación básica de campos requeridos
     if 'cell_name' not in request.form or 'image_top' not in request.files or 'image_side' not in request.files:
-        return jsonify({"error": "Faltan datos requeridos (cell_name, image_top o image_side)."}), 400
+        return jsonify({"error": "Missing required data (cell_name, image_top, or image_side)."}), 400
 
-    # Sanitizar cell_name para evitar problemas en paths/URLs
-    import re
-    cell_name_raw = request.form['cell_name'].strip()
-    cell_name = re.sub(r'[^a-zA-Z0-9_-]', '_', cell_name_raw)
-    if not cell_name or len(cell_name) > 100:
-        return jsonify({"error": "Nombre de célula inválido o demasiado largo."}), 400
-
+    cell_name = request.form['cell_name']
     file_top = request.files['image_top']
     file_side = request.files['image_side']
-
-    # Validación simple de extensiones
-    allowed_ext = {'.jpg', '.jpeg', '.png'}
-    if not file_top.filename.lower().endswith(tuple(allowed_ext)) or \
-       not file_side.filename.lower().endswith(tuple(allowed_ext)):
-        return jsonify({"error": "Solo se permiten archivos .jpg, .jpeg o .png"}), 400
-
-    # Fecha: por defecto ahora real, pero permite override para pruebas
+    
     now = datetime.now()
-    test_date_str = request.form.get('test_date')  # opcional: "2025-02-10" o "2025-02-10 14:30:00"
-
-    if test_date_str:
-        try:
-            if ' ' in test_date_str:  # con hora
-                now = datetime.strptime(test_date_str, "%Y-%m-%d %H:%M:%S")
-            else:  # solo fecha → combina con hora actual
-                base_date = datetime.strptime(test_date_str, "%Y-%m-%d")
-                current_time = datetime.now()
-                now = base_date.replace(
-                    hour=current_time.hour,
-                    minute=current_time.minute,
-                    second=current_time.second,
-                    microsecond=current_time.microsecond
-                )
-            print(f"[TEST MODE] Fecha manual activada: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-        except ValueError as ve:
-            print(f"[TEST MODE] Formato de test_date inválido '{test_date_str}': {ve} → usando fecha real")
-            now = datetime.now()
-        except Exception as e:
-            print(f"[TEST MODE] Error al parsear test_date: {e} → usando fecha real")
-            now = datetime.now()
-
     date_str = now.strftime("%Y-%m-%d")
     timestamp = now.strftime("%Y%m%d%H%M%S")
-
-    # Generación de ID legible y único (formato que te gusta)
-    unique_suffix = uuid.uuid4().hex[:6]  # 6 caracteres hexadecimales únicos
-    measurement_id = f"{cell_name}-{timestamp}-{unique_suffix}"
-
-    # Rutas para guardar (estructura: Date/Cell)
+    measurement_id = f"{cell_name}-{timestamp}"
+    
+    # Rutas para guardar (Estructura: Date/Cell)
     day_upload_dir = os.path.join(UPLOAD_FOLDER, date_str)
-    cell_upload_dir = os.path.join(day_upload_dir, cell_name)
-    os.makedirs(cell_upload_dir, exist_ok=True)
+    cell_upload_dir = os.path.join(day_upload_dir, cell_name) 
+    os.makedirs(cell_upload_dir, exist_ok=True) 
 
     day_predicted_dir = os.path.join(PREDICTED_FOLDER, date_str)
     cell_predicted_dir = os.path.join(day_predicted_dir, cell_name)
     os.makedirs(cell_predicted_dir, exist_ok=True)
 
-    # Nombres de archivo originales (usando cell_name para mantener consistencia con CSV)
-    uploaded_filename_top = f"{cell_name}_TOP_uploaded.jpg"
+    # Nombres de archivo que esperan las utilidades de URL
+    uploaded_filename_top = f"{cell_name}_TOP_uploaded.jpg" 
     uploaded_filename_side = f"{cell_name}_SIDE_uploaded.jpg"
 
     path_top = os.path.join(cell_upload_dir, uploaded_filename_top)
     path_side = os.path.join(cell_upload_dir, uploaded_filename_side)
-
-    # Guardar imágenes originales
+    
+    # Guardar las imágenes originales
     file_top.save(path_top)
     file_side.save(path_side)
 
-    # Ejecutar Predicción (usamos measurement_id como sample_key para que los archivos internos sean únicos)
+    # Ejecutar Predicción
     try:
-        prediction_result = process_pair_for_backend(
-            top_image_path=path_top,
-            side_image_path=path_side,
-            sample_key=measurement_id,  # ← ID único y legible aquí
-            output_dir=cell_predicted_dir
+        estimated_volume, predicted_top_path, predicted_side_path = predict_volume_and_save_images(
+            path_top, 
+            path_side, 
+            cell_predicted_dir, 
+            cell_name
         )
     except Exception as e:
         print(f"Error fatal durante la predicción para {cell_name}: {e}")
-        return jsonify({"error": f"Error interno en el modelo de predicción: {str(e)}"}), 500
+        return jsonify({"error": f"Internal prediction model error: {str(e)}"}), 500
 
-    # Verificar si hubo error en la predicción
-    if "error" in prediction_result:
-        return jsonify({"error": prediction_result["error"]}), 400
-
-    # Extraer valores principales
-    estimated_volume = prediction_result.get("total_volume_ml", 0.0)
-    height_mm = prediction_result.get("height_mm")
-
-    # Rutas de imágenes predichas (priorizamos with_text si existe, sino clean)
-    images = prediction_result.get("images", {})
-    predicted_top = images.get("top_with_text") or images.get("top_clean")
-    predicted_side = images.get("side_with_text") or images.get("side_clean")
-
-    # Guardar JSON completo de la predicción
-    json_path = os.path.join(cell_predicted_dir, f"{measurement_id}_prediction.json")
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(prediction_result, f, indent=2, ensure_ascii=False)
-
-    # Registrar en CSV (versión más completa)
+    # Registrar en CSV
     df = load_data_log()
     new_row = {
         'Cell Name': cell_name,
-        'Measurement ID': measurement_id,  # ← ID único y legible guardado aquí
+        'Measurement ID': measurement_id,
         'Upload Date': now.strftime("%Y-%m-%d %H:%M:%S"),
-        'Estimated Volume (mL)': round(estimated_volume, 4),
-        'Height (mm)': round(height_mm, 2) if height_mm is not None else None,
-        'Num Cells Detected': len(prediction_result.get("cells", [])),
-        'Image Location (Top)': path_top,
-        'Image Location (Side)': path_side,
+        'Estimated Volume (mL)': estimated_volume,
+        'Image Location (Top)': path_top, 
+        'Image Location (Side)': path_side, 
     }
     
     df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
     df.to_csv(LOG_FILE, index=False)
 
-    # Construir URLs
-    base_pred_url = f"{IMAGE_API_ROUTE}/{date_str}/{cell_name}"
-    base_upload_url = f"{UPLOAD_API_ROUTE}/{date_str}/{cell_name}"
-
-    response = {
-        "status": prediction_result["status"],
-        "measurement_id": measurement_id,  # ← ID único y legible devuelto al frontend
+    # Devolver respuesta con las 4 URLs (CRÍTICO para el frontend)
+    return jsonify({
+        "status": "success",
+        "measurement_id": measurement_id,
         "cell_name": cell_name,
-        "estimated_volume": round(estimated_volume, 4),
-        "height_mm": height_mm,
-        "num_cells_detected": len(prediction_result.get("cells", [])),
-        "processed_date": now.strftime("%Y-%m-%d %H:%M:%S"),  # fecha usada (útil para confirmar en pruebas)
+        "estimated_volume": estimated_volume,
         
-        # Imágenes predichas
-        "predicted_image_top_clean_url": f"{base_pred_url}/{os.path.basename(images.get('top_clean', ''))}" if 'top_clean' in images else None,
-        "predicted_image_top_with_text_url": f"{base_pred_url}/{os.path.basename(images.get('top_with_text', ''))}" if 'top_with_text' in images else None,
-        "predicted_image_side_clean_url": f"{base_pred_url}/{os.path.basename(images.get('side_clean', ''))}" if 'side_clean' in images else None,
-        "predicted_image_side_with_text_url": f"{base_pred_url}/{os.path.basename(images.get('side_with_text', ''))}" if 'side_with_text' in images else None,
+        "predicted_image_top_url": f"{IMAGE_API_ROUTE}/{date_str}/{cell_name}/{os.path.basename(predicted_top_path)}",
+        "predicted_image_side_url": f"{IMAGE_API_ROUTE}/{date_str}/{cell_name}/{os.path.basename(predicted_side_path)}",
         
-        # Imágenes originales
-        "uploaded_image_top_url": f"{base_upload_url}/{uploaded_filename_top}",
-        "uploaded_image_side_url": f"{base_upload_url}/{uploaded_filename_side}",
-        
-        # Resumen de células (opcional, pero muy útil)
-        "cells_summary": prediction_result.get("cells", []),
-    }
+        "uploaded_image_top_url": f"{UPLOAD_API_ROUTE}/{date_str}/{cell_name}/{uploaded_filename_top}",
+        "uploaded_image_side_url": f"{UPLOAD_API_ROUTE}/{date_str}/{cell_name}/{uploaded_filename_side}",
+    }), 200
 
-    return jsonify(response), 200
 # ==============================================================================
 # 6. EJECUCIÓN DEL SERVIDOR
 # ==============================================================================

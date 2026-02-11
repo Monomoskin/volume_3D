@@ -64,7 +64,7 @@ const NewMeasurement = () => {
       } catch (error) {
         console.error("Error fetching available cells:", error);
         setCellsError(
-          "Failed to load cell list. Check network or server status."
+          "Failed to load cell list. Check network or server status.",
         );
       } finally {
         setLoadingCells(false);
@@ -129,38 +129,46 @@ const NewMeasurement = () => {
 
     setIsProcessing(true);
     setResults(null);
-    message.info("Starting 3D analysis. Waiting for backend response...");
+    message.info("Iniciando análisis 3D...");
 
     try {
-      const actualTopFile = topFile[0].originFileObj;
-      const actualSideFile = sideFile[0].originFileObj;
-      console.log(topFile, sideFile);
+      const actualTopFile = topFile[0]?.originFileObj;
+      const actualSideFile = sideFile[0]?.originFileObj;
+
+      if (!actualTopFile || !actualSideFile) {
+        throw new Error("Archivos de imagen no válidos");
+      }
+
+      // Construir payload mínimo y correcto
+      const payload = {
+        cell_name: values.cellName || values.idCode || selectedCell,
+      };
+
+      // Solo agregar test_date si el usuario seleccionó una fecha
+      if (values.testDate) {
+        payload.test_date = values.testDate.format("YYYY-MM-DD");
+        console.log("[DEBUG] Enviando test_date:", payload.test_date);
+      }
+
+      // Llamada al servicio (ya adaptado)
       const response = await analyzeSample(
-        values,
+        payload,
         actualTopFile,
-        actualSideFile
+        actualSideFile,
       );
 
-      setResults({
-        cell_name: response.cell_name,
-        volume_ml: parseFloat(response.estimated_volume),
-        top_image_url: response.predicted_image_top_url,
-        side_image_url: response.predicted_image_side_url,
-        measurement_id: response.measurement_id,
-      });
+      // Guardar toda la respuesta (más rica ahora)
+      setResults(response);
 
       message.success(
-        `Analysis completed for ${response["Cell Name"]}. Volume: ${parseFloat(
-          response["Estimated Volume (mL)"]
-        ).toFixed(3)} mL`
+        `Análisis completado para ${response.cell_name}. ` +
+          `Volumen: ${response.estimated_volume?.toFixed(3) || "N/A"} mL`,
       );
     } catch (error) {
-      const defaultMessage =
-        "Failed to communicate with the Backend. Please check server status.";
-      const errorMessage = error.message || defaultMessage;
-
-      message.error(`Analysis Failed: ${errorMessage}`);
-      console.error("API Error:", error);
+      message.error(
+        `Error en el análisis: ${error.message || "Error desconocido"}`,
+      );
+      console.error("Error API:", error);
     } finally {
       setIsProcessing(false);
     }
@@ -299,16 +307,17 @@ const NewMeasurement = () => {
                   {/* Fecha de la Foto */}
                   <Form.Item
                     label="Photo Date"
-                    name="photoDate"
-                    rules={[
-                      { required: true, message: "The date is required." },
-                    ]}
+                    name="testDate"
+                    // rules={[
+                    //   { required: true, message: "The date is required." },
+                    // ]}
                   >
                     <DatePicker
                       className="w-full"
                       format="YYYY-MM-DD"
+                      allowClear
                       // disabledDate={(current) =>
-                      //   current && current > dayjs().endOf("day")
+                      //   current && current < dayjs().endOf("day")
                       // }
                     />
                   </Form.Item>

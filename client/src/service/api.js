@@ -24,37 +24,64 @@ const handleResponse = (response) => {
 
 /**
  * Realiza la petición POST al backend de Flask para analizar la muestra.
- * * @param {object} data - Datos del formulario (cellName, idCode, photoDate).
+ * @param {object} payload - Datos mínimos: { cell_name: string, [test_date]: string (opcional) }
  * @param {File} topFile - Archivo de imagen de la vista TOP.
  * @param {File} sideFile - Archivo de imagen de la vista SIDE.
- * @returns {Promise<object>} Objeto de respuesta JSON del backend con volumen y URLs.
+ * @returns {Promise<object>} Objeto de respuesta JSON del backend (volumen, altura, URLs múltiples, etc.)
  */
-export const analyzeSample = async (data, topFile, sideFile) => {
+export const analyzeSample = async (payload, topFile, sideFile) => {
   const endpoint = "/analyze";
   const formData = new FormData();
 
-  // Datos del formulario
-  formData.append("cell_name", data.cellName);
-  formData.append("id_code", data.idCode);
-  formData.append("photo_date", data.photoDate.format("YYYY-MM-DD"));
+  // 1. Campo obligatorio: cell_name
+  if (!payload.cell_name) {
+    throw new Error("cell_name es requerido");
+  }
+  formData.append("cell_name", payload.cell_name);
 
-  // Archivos de imagen
+  // 2. Campo opcional: test_date (solo si existe)
+  if (payload.test_date) {
+    // Acepta formato "YYYY-MM-DD" o "YYYY-MM-DD HH:mm:ss"
+    formData.append("test_date", payload.test_date);
+    console.log("[DEBUG analyzeSample] Enviando test_date:", payload.test_date);
+  }
+
+  // 3. Archivos obligatorios
+  if (!topFile || !sideFile) {
+    throw new Error("Faltan archivos de imagen (top y/o side)");
+  }
   formData.append("image_top", topFile);
   formData.append("image_side", sideFile);
 
   try {
-    // Axios maneja automáticamente el 'Content-Type': 'multipart/form-data' con FormData.
-    const response = await api.post(endpoint, formData);
+    const response = await api.post(endpoint, formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+
+    console.log("[DEBUG analyzeSample] Respuesta exitosa:", response.data);
     return response.data;
   } catch (error) {
-    // Axios centraliza la respuesta de error en error.response
-    const errorMessage =
-      error.response?.data?.error ||
-      error.message ||
-      "Unknown error during analysis.";
+    // Manejo mejorado de errores
+    let errorMessage = "Error desconocido al analizar la muestra.";
 
-    console.error("Error during API call analyzeSample:", error);
-    // Lanzar el mensaje de error para que el componente lo maneje
+    if (error.response) {
+      // El backend devolvió un error (400, 500, etc.)
+      errorMessage =
+        error.response.data?.error ||
+        error.response.data?.message ||
+        `Error ${error.response.status}: ${error.response.statusText}`;
+    } else if (error.request) {
+      // No hubo respuesta del servidor (timeout, CORS, offline, etc.)
+      errorMessage =
+        "No se pudo conectar con el servidor. Verifica si el backend está corriendo.";
+    } else {
+      // Error al preparar la petición
+      errorMessage = error.message;
+    }
+
+    console.error("[ERROR analyzeSample]:", errorMessage, error);
     throw new Error(errorMessage);
   }
 };
